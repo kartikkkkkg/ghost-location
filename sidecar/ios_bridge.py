@@ -4,13 +4,14 @@ No request is acknowledged until the awaited upstream operation completes.
 The DVT set selector expects a device reply; clear is an upstream no-reply selector.
 """
 import asyncio
-from contextlib import AsyncExitStack, aclosing, suppress
+from contextlib import AsyncExitStack, suppress
 from contextvars import ContextVar
 from datetime import datetime, timezone
 import importlib.metadata
 import json
 import logging
 import math
+import plistlib
 import re
 import sys
 
@@ -25,8 +26,10 @@ logging.basicConfig(stream=sys.stderr, level=logging.WARNING)
 
 from packaging.version import Version
 from pymobiledevice3 import usbmux
+from pymobiledevice3.common import get_home_folder
 from pymobiledevice3.exceptions import AlreadyMountedError
-from pymobiledevice3.lockdown import create_using_usbmux, get_mobdev2_lockdowns
+from pymobiledevice3.lockdown import browse_mobdev2, create_using_tcp, create_using_usbmux
+from pymobiledevice3.pair_records import get_preferred_pair_record
 from pymobiledevice3.remote import userspace_tunnel
 from pymobiledevice3.remote.tunnel_service import CoreDeviceTunnelProxy
 from pymobiledevice3.services.dvt.instruments.dvt_provider import DvtProvider
@@ -62,19 +65,54 @@ async def usb_lockdown(udid, autopair=False):
 CONNECTION = ContextVar("ghost_connection", default="usb")
 
 
+async def wifi_pair_record(udid):
+    """Pair record for the UDID, looked up by identifier.
+
+    The lookup must never depend on the cached WiFiMACAddress: iOS rotates
+    private Wi-Fi addresses, so the MAC stored at pairing time goes stale and
+    would wrongly exclude the phone from Wi-Fi discovery.
+    """
+    try:
+        return await get_preferred_pair_record(udid, get_home_folder())
+    except Exception:
+        return None
+
+
+async def wifi_lockdown_for(udid, pair_record, timeout=2):
+    """Return a paired Wi-Fi lockdown for the exact UDID.
+
+    Identity is established by UDID plus pairing validation, never by the
+    Bonjour-advertised MAC address (see wifi_pair_record).
+    """
+    seen = set()
+    try:
+        async with asyncio.timeout(12):
+            for answer in await browse_mobdev2(timeout=timeout):
+                if "@" not in answer.instance:
+                    continue
+                for address in answer.addresses:
+                    if address.full_ip in seen:
+                        continue
+                    seen.add(address.full_ip)
+                    try:
+                        lockdown = await create_using_tcp(hostname=address.full_ip, autopair=False, pair_record=pair_record)
+                    except Exception:
+                        continue
+                    # Bonjour names and pairing records alone do not establish identity.
+                    if lockdown.udid == udid and lockdown.paired:
+                        return lockdown
+                    await lockdown.close()
+    except TimeoutError:
+        pass
+    raise ConnectionError("This trusted iPhone was not found on Wi-Fi. Unlock it, use the same network and enable Wi-Fi over USB first.")
+
+
 async def connection_lockdown(udid, autopair=False):
     if CONNECTION.get() == "usb":
         return await usb_lockdown(udid, autopair=autopair)
     if not isinstance(udid, str) or not re.fullmatch(r"[A-Za-z0-9-]{8,80}", udid):
         raise ValueError("A specific iPhone identifier is required.")
-    async with asyncio.timeout(8):
-        async with aclosing(get_mobdev2_lockdowns(only_paired=True, timeout=2)) as devices:
-            async for _address, lockdown in devices:
-                # Bonjour names and pairing records alone do not establish identity.
-                if lockdown.udid == udid and lockdown.paired:
-                    return lockdown
-                await lockdown.close()
-    raise ConnectionError("This trusted iPhone was not found on Wi-Fi. Unlock it, use the same network and enable Wi-Fi over USB first.")
+    return await wifi_lockdown_for(udid, await wifi_pair_record(udid))
 
 
 async def strict_usb_provider(serial, autopair, remotepairing_fallback=False):
@@ -116,22 +154,50 @@ class Bridge:
             item.update(state="ready", detail=f"{'Wi-Fi' if connection == 'wifi' else 'USB'} connected. Developer Mode enabled.")
         return item
 
+    async def discover_wifi(self, timeout=2):
+        """List paired Wi-Fi iPhones, matching pair records by UDID.
+
+        See wifi_lockdown_for: the cached WiFiMACAddress is never used to
+        filter, so a rotated private Wi-Fi address cannot hide the phone.
+        """
+        records = {}
+        for file in get_home_folder().glob("*.plist"):
+            if file.name.startswith("remote_") or not file.name.endswith(".plist"):
+                continue
+            try:
+                records[file.name[:-len(".plist")]] = plistlib.loads(file.read_bytes())
+            except Exception:
+                continue
+        result, seen = [], set()
+        if not records:
+            return result
+        # Bound Bonjour discovery so an unreachable paired phone cannot hang a scan.
+        try:
+            async with asyncio.timeout(12):
+                for answer in await browse_mobdev2(timeout=timeout):
+                    if "@" not in answer.instance:
+                        continue
+                    for address in answer.addresses:
+                        for udid, record in records.items():
+                            if udid in seen:
+                                continue
+                            try:
+                                async with await create_using_tcp(hostname=address.full_ip, autopair=False, pair_record=record) as lockdown:
+                                    if lockdown.udid == udid and lockdown.paired and udid not in seen:
+                                        result.append(await self.describe(lockdown, "wifi"))
+                                        seen.add(udid)
+                            except Exception:
+                                continue
+                        if len(seen) == len(records):
+                            return result
+        except TimeoutError:
+            pass
+        return result
+
     async def discover(self):
         result = []
         if CONNECTION.get() == "wifi":
-            seen = set()
-            # Bound Bonjour discovery so an unreachable paired phone cannot hang a scan.
-            try:
-                async with asyncio.timeout(8):
-                    async with aclosing(get_mobdev2_lockdowns(only_paired=True, timeout=2)) as devices:
-                        async for _address, lockdown in devices:
-                            async with lockdown:
-                                if lockdown.udid not in seen and lockdown.paired:
-                                    result.append(await self.describe(lockdown, "wifi"))
-                                    seen.add(lockdown.udid)
-            except TimeoutError:
-                pass
-            return result
+            return await self.discover_wifi()
         for device in await usbmux.list_devices():
             if device.connection_type != "USB":
                 continue

@@ -281,37 +281,70 @@ class BridgeTests(unittest.IsolatedAsyncioTestCase):
         with self.assertRaisesRegex(RuntimeError, "did not close completely"):
             await bridge_module.Bridge.connect(bridge, "phone")
 
+    def wifi_answer(self, mac, ip):
+        return SimpleNamespace(
+            instance=f"{mac}@192.168.1.20-supportsRP-26",
+            addresses=[SimpleNamespace(full_ip=ip)],
+        )
+
     async def test_wifi_factory_uses_only_paired_exact_identity_and_closes_other_phones(self):
         wanted = "00008030-0000000000000001"
+        record = {"WiFiMACAddress": "aa:bb:cc:dd:ee:ff"}
         other = SimpleNamespace(udid="00008030-0000000000000002", paired=True, close=AsyncMock())
         selected = SimpleNamespace(udid=wanted, paired=True, close=AsyncMock())
-        options = []
-        async def network_devices(**kwargs):
-            options.append(kwargs)
-            yield "192.168.1.21", other
-            yield "192.168.1.20", selected
+        by_ip = {"192.168.1.21": other, "192.168.1.20": selected}
+        async def fake_tcp(**kwargs):
+            return by_ip[kwargs["hostname"]]
         token = bridge_module.CONNECTION.set("wifi")
         try:
-            with patch.object(bridge_module, "get_mobdev2_lockdowns", network_devices), patch.object(bridge_module, "usb_lockdown", AsyncMock()) as usb:
+            with patch.object(bridge_module, "get_preferred_pair_record", AsyncMock(return_value=record)), \
+                 patch.object(bridge_module, "browse_mobdev2", AsyncMock(return_value=[
+                     self.wifi_answer("aa:bb:cc:dd:ee:ff", "192.168.1.21"),
+                     self.wifi_answer("aa:bb:cc:dd:ee:ff", "192.168.1.20"),
+                 ])), \
+                 patch.object(bridge_module, "create_using_tcp", AsyncMock(side_effect=fake_tcp)) as tcp, \
+                 patch.object(bridge_module, "usb_lockdown", AsyncMock()) as usb:
                 with patch.object(bridge_module.CoreDeviceTunnelProxy, "create", AsyncMock(return_value="proxy")):
                     self.assertEqual(await bridge_module.strict_usb_provider(wanted, True, True), ("proxy", selected))
                 usb.assert_not_awaited()
-            self.assertTrue(options[0]["only_paired"])
+            for call in tcp.await_args_list:
+                self.assertFalse(call.kwargs["autopair"])
+                self.assertIs(call.kwargs["pair_record"], record)
             other.close.assert_awaited_once()
             selected.close.assert_not_awaited()
         finally:
             bridge_module.CONNECTION.reset(token)
 
-    async def test_wifi_missing_phone_never_falls_back_to_usb(self):
-        async def network_devices(**kwargs):
-            if False:
-                yield None
+    async def test_wifi_connection_ignores_stale_cached_mac(self):
+        # iOS rotates private Wi-Fi addresses: the cached record still holds the
+        # old MAC while Bonjour advertises the new one. Identity must come from
+        # the UDID + pairing check, never the MAC.
+        wanted = "00008030-0000000000000001"
+        stale_record = {"WiFiMACAddress": "c4:16:8f:8e:5e:1b"}
+        selected = SimpleNamespace(udid=wanted, paired=True, close=AsyncMock())
         token = bridge_module.CONNECTION.set("wifi")
         try:
-            with patch.object(bridge_module, "get_mobdev2_lockdowns", network_devices), patch.object(bridge_module, "usb_lockdown", AsyncMock()) as usb:
+            with patch.object(bridge_module, "get_preferred_pair_record", AsyncMock(return_value=stale_record)), \
+                 patch.object(bridge_module, "browse_mobdev2", AsyncMock(return_value=[
+                     self.wifi_answer("e2:14:8e:f5:4f:3d", "192.168.1.20"),
+                 ])), \
+                 patch.object(bridge_module, "create_using_tcp", AsyncMock(return_value=selected)):
+                self.assertIs(await bridge_module.connection_lockdown(wanted), selected)
+                selected.close.assert_not_awaited()
+        finally:
+            bridge_module.CONNECTION.reset(token)
+
+    async def test_wifi_missing_phone_never_falls_back_to_usb(self):
+        token = bridge_module.CONNECTION.set("wifi")
+        try:
+            with patch.object(bridge_module, "get_preferred_pair_record", AsyncMock(return_value=None)), \
+                 patch.object(bridge_module, "browse_mobdev2", AsyncMock(return_value=[])), \
+                 patch.object(bridge_module, "create_using_tcp", AsyncMock()) as tcp, \
+                 patch.object(bridge_module, "usb_lockdown", AsyncMock()) as usb:
                 with self.assertRaisesRegex(ConnectionError, "not found on Wi-Fi"):
                     await bridge_module.connection_lockdown("00008030-0000000000000001")
                 usb.assert_not_awaited()
+                tcp.assert_not_awaited()
         finally:
             bridge_module.CONNECTION.reset(token)
 
@@ -357,19 +390,54 @@ class BridgeTests(unittest.IsolatedAsyncioTestCase):
                 await bridge.dispatch("enable-wifi", {"udid": "another-phone"})
 
     async def test_wifi_discovery_deduplicates_and_closes_connections(self):
+        import plistlib
+        import tempfile
+        from pathlib import Path
+        udid = "00008030-0000000000000001"
         bridge = bridge_module.Bridge()
         lockdown = AsyncMock()
-        lockdown.udid = "00008030-0000000000000001"
+        lockdown.udid = udid
         lockdown.paired = True
         lockdown.__aenter__.return_value = lockdown
-        async def devices(**kwargs):
-            yield "192.168.1.20", lockdown
-            yield "fe80::1", lockdown
+        answer = SimpleNamespace(
+            instance="aa:bb:cc:dd:ee:ff@192.168.1.20-supportsRP-26",
+            addresses=[SimpleNamespace(full_ip="192.168.1.20"), SimpleNamespace(full_ip="fe80::1")],
+        )
         bridge.describe = AsyncMock(return_value={"id": "phone", "connection": "wifi"})
-        with patch.object(bridge_module, "get_mobdev2_lockdowns", devices):
-            result = await bridge.dispatch("discover", {"connection": "wifi"})
+        with tempfile.TemporaryDirectory() as home:
+            Path(home, f"{udid}.plist").write_bytes(plistlib.dumps({"WiFiMACAddress": "aa:bb:cc:dd:ee:ff"}))
+            with patch.object(bridge_module, "get_home_folder", lambda: Path(home)), \
+                 patch.object(bridge_module, "browse_mobdev2", AsyncMock(return_value=[answer])), \
+                 patch.object(bridge_module, "create_using_tcp", AsyncMock(return_value=lockdown)) as tcp:
+                result = await bridge.dispatch("discover", {"connection": "wifi"})
         self.assertEqual(len(result), 1)
-        self.assertEqual(lockdown.__aexit__.await_count, 2)
+        # The second address is skipped once the UDID is already identified.
+        self.assertEqual(tcp.await_count, 1)
+        self.assertEqual(lockdown.__aexit__.await_count, 1)
+
+    async def test_wifi_discovery_ignores_stale_cached_mac(self):
+        # Same rotated-MAC scenario as the connection test, but through the
+        # cached plist that discover_wifi reads from disk.
+        import plistlib
+        import tempfile
+        from pathlib import Path
+        udid = "00008030-0000000000000001"
+        bridge = bridge_module.Bridge()
+        lockdown = AsyncMock()
+        lockdown.udid = udid
+        lockdown.paired = True
+        lockdown.__aenter__.return_value = lockdown
+        bridge.describe = AsyncMock(return_value={"id": "phone", "connection": "wifi"})
+        with tempfile.TemporaryDirectory() as home:
+            Path(home, f"{udid}.plist").write_bytes(plistlib.dumps({"WiFiMACAddress": "c4:16:8f:8e:5e:1b"}))
+            with patch.object(bridge_module, "get_home_folder", lambda: Path(home)), \
+                 patch.object(bridge_module, "browse_mobdev2", AsyncMock(return_value=[
+                     self.wifi_answer("e2:14:8e:f5:4f:3d", "192.168.1.20"),
+                 ])), \
+                 patch.object(bridge_module, "create_using_tcp", AsyncMock(return_value=lockdown)):
+                result = await bridge.dispatch("discover", {"connection": "wifi"})
+        self.assertEqual(len(result), 1)
+        self.assertEqual(result[0]["connection"], "wifi")
 
 
 if __name__ == "__main__":
