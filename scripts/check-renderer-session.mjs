@@ -178,6 +178,32 @@ try {
   const handedOff = await page.evaluate(() => window.ghost.getState());
   assert.equal(handedOff.session.connection, 'wifi'); assert.equal(handedOff.route.status, 'running');
   assert.deepEqual((await page.evaluate(() => window.ghostFixture.getCalls())).filter(c => c.method === 'switchToWifi'), [{method: 'switchToWifi', deviceId: phone.id}]);
+  // Regression: a ready Wi-Fi phone must keep Set/Update location available. A
+  // 0.1.5-era USB-only gate in renderActions() disabled the Apply button for
+  // every Wi-Fi connection, which made the entire Wi-Fi feature unusable.
+  const wifiAppliesBefore = (await page.evaluate(() => window.ghostFixture.getCalls())).filter(c => c.method === 'applyLocation').length;
+  // The handoff left a running route; mode buttons stay locked until it ends.
+  await page.evaluate(async () => { const s = await window.ghost.getState(); await window.ghostFixture.setState({ route: null }); });
+  await page.locator('[data-location-mode="fixed"]').click();
+  assert.equal(await page.locator('#apply-button').isEnabled(), true, 'Update location must stay available after the Wi-Fi handoff.');
+  assert.match(await page.locator('#apply-button').textContent(), /Update location/);
+  await page.getByRole('button', { name: 'Update location', exact: true }).click();
+  await page.waitForFunction(() => !document.querySelector('#apply-button').disabled);
+  // A freshly connected Wi-Fi phone with no session must offer Set location.
+  await page.evaluate(async () => {
+    const s = await window.ghost.getState();
+    await window.ghostFixture.setState({ session: null, route: null,
+      devices: [{ ...s.devices[0], connection: 'wifi', state: 'ready', detail: 'Wi-Fi connected.' }],
+      preferences: { ...s.preferences, connection: 'wifi' } });
+  });
+  assert.equal(await page.locator('#apply-button').isEnabled(), true, 'Set location must be available for a ready Wi-Fi phone.');
+  assert.match(await page.locator('#apply-button').textContent(), /Set location/);
+  await page.getByRole('button', { name: 'Set location', exact: true }).click();
+  await page.waitForFunction(() => !document.querySelector('#apply-button').disabled);
+  const wifiApplies = (await page.evaluate(() => window.ghostFixture.getCalls())).filter(c => c.method === 'applyLocation');
+  assert.equal(wifiApplies.length, wifiAppliesBefore + 2, 'Both Wi-Fi Apply clicks must reach applyLocation.');
+  assert.ok(wifiApplies.slice(-2).every(c => c.deviceId === phone.id), 'Wi-Fi locations must target the Wi-Fi phone.');
+  console.log('PASS: ready Wi-Fi phones keep Set/Update location enabled and apply to the Wi-Fi phone.');
   await page.locator('#connection-options').click();
   await page.evaluate(async () => { const s = await window.ghost.getState(); await window.ghostFixture.setState({preferences: {...s.preferences, connection: 'usb'}}); });
   await page.evaluate(() => window.ghostFixture.setState({session: null, route: null, devices: []}));

@@ -327,7 +327,10 @@ function renderActions() {
   const otherSession = state.session && state.session.deviceId !== selectedDeviceId;
   const retry = ['unknown', 'error', 'waiting'].includes(status) && !otherSession;
   const reconnectIOS = Boolean(state.session) && !otherSession && device?.platform === 'ios' && device.state === 'setup-required';
-  const canApply = device?.connection === 'usb' && (device.state === 'ready' || reconnectIOS);
+  // Wi-Fi phones apply locations through the same backend path as USB (0.1.6+);
+  // the USB-only gate below is a 0.1.5 leftover that silently disabled the
+  // entire Wi-Fi feature's Set/Update/Retry button.
+  const canApply = ['usb', 'wifi'].includes(device?.connection) && (device.state === 'ready' || reconnectIOS);
   const label = pendingAction === 'restore' ? 'Stopping…' : status === 'reconnecting' ? 'Reconnecting…' : busy ? 'Working…' : reconnectIOS || (retry && status === 'waiting') ? 'Reconnect & set location' : retry ? 'Retry location' : status === 'active' ? 'Update location' : 'Set location';
   $('#apply-button').disabled = busy || !selectedPlace || !canApply || Boolean(otherSession);
   setContent('#apply-button', `<span>${label}</span>${icon(busy ? 'loader-circle' : retry ? 'refresh-cw' : 'arrow-up-right', busy ? 'spin' : '')}`);
