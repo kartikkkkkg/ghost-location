@@ -9,6 +9,10 @@
 - Fix iPhone Wi-Fi discovery going stale when iOS rotates its private Wi-Fi
   MAC address; devices are now matched by UDID.
 - Fix the Set/Update location button staying disabled for Wi-Fi phones.
+- Routes no longer pause when an update takes over a second — routine on
+  Wi-Fi. Points are sent at the rate the phone accepts while the position
+  stays true to elapsed time, and a scheduling stall resyncs with travel
+  capped per tick instead of pausing the route.
 
 ## 0.1.7
 

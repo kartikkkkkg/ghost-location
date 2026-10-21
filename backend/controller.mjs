@@ -645,12 +645,17 @@ export class Controller extends EventEmitter {
     }
     const started = this.clock(), elapsed = started - this.routeStepAt;
     if (elapsed < 1000) { this.scheduleRouteTick(1000 - elapsed); return; }
-    if (elapsed > 2000) { await this.pauseRoute(); this.state.route.message = 'Updates fell behind. Resume when the computer and phone connection are ready.'; this.notify(); return; }
+    // Slow ticks never kill the route. A transport that needs more than a
+    // second per update is normal on Wi-Fi: points simply go out at the
+    // rate the phone accepts, while the position stays true to wall-clock
+    // time. Travel per tick is capped so a scheduling stall cannot
+    // teleport the phone, and the clock resyncs here instead of pausing.
+    const advanceMs = Math.min(elapsed, 10000);
     this.routeStepAt = started;
     const operation = async () => {
       try {
         const device = this.device(current.deviceId);
-        let distance = this.advanceRoute(route, elapsed);
+        let distance = this.advanceRoute(route, advanceMs);
         if (route.loop && distance >= route.distanceMeters) {
           route.loops = (route.loops || 0) + 1;
           route.traveledMeters = 0; route.speedNow = 0; route.dwellMs = 0;
@@ -671,9 +676,17 @@ export class Controller extends EventEmitter {
         if (distance >= route.distanceMeters) {
           route.status = 'completed'; route.message = 'Arrived. Your phone holds the destination until you restore real location.';
           await this.recordRouteHistory(route, true);
-        } else if (this.clock() - started >= 1000) {
-          this.pauseRouteMotion('Location updates are taking longer than a second. Check the connection, then resume.');
-          await this.persist();
+        } else {
+          // A slow update is information, not a fault: note it and keep
+          // driving. The note clears when updates are fast again.
+          const duration = this.clock() - started;
+          if (duration >= 1000 && !route.slowTransport && distance > 0) {
+            route.slowTransport = true;
+            route.message = 'Connection is slow, so points go out as fast as the phone accepts them. The route keeps its pace.';
+          } else if (duration < 1000 && route.slowTransport) {
+            route.slowTransport = false;
+            if (route.message.startsWith('Connection is slow')) route.message = this.routeMessage(route);
+          }
         }
         this.notify();
       } catch (error) {

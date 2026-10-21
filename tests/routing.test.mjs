@@ -117,15 +117,20 @@ test('failed initial route can resume through manual reconnect, without getting 
   await assert.rejects(f.start()); assert.equal(f.c.state.route.status, 'paused');
   f.adapter.set = set; await f.c.resumeRoute(); assert.equal(f.c.state.route.status, 'running');
 });
-test('slow transport and long scheduling stalls pause instead of queueing or jumping', async t => {
+test('slow transport and long scheduling stalls never pause or teleport the route', async t => {
   const f = await fixture(t); await f.start();
   let finish; f.adapter.update = () => new Promise(resolve => {finish = resolve;});
   f.advance(1000); const tick = f.c.tickRoute();
   await f.c.tickRoute(); // No concurrent write.
   f.advance(1500); finish({}); await tick;
-  assert.equal(f.c.state.route.status, 'paused'); close(f.c.state.route.traveledMeters, ROUTE_SPEED_MPS);
-  await f.c.resumeRoute(); f.advance(60000); await f.c.tickRoute();
-  assert.equal(f.c.state.route.status, 'paused'); close(f.c.state.route.traveledMeters, ROUTE_SPEED_MPS);
+  assert.equal(f.c.state.route.status, 'running', 'An update taking 2.5s must not pause the route');
+  close(f.c.state.route.traveledMeters, ROUTE_SPEED_MPS);
+  assert.equal(f.c.state.route.slowTransport, true, 'Slow transport is surfaced as information');
+  f.adapter.update = async (device, point) => { f.calls.push(['update', device.id, {...point}]); return {}; };
+  f.advance(60000); await f.c.tickRoute();
+  assert.equal(f.c.state.route.status, 'running', 'A 60s scheduling stall must not pause the route');
+  close(f.c.state.route.traveledMeters, ROUTE_SPEED_MPS * 11, 0.01); // 1s + travel capped at 10s
+  assert.equal(f.c.state.route.slowTransport, false, 'Fast updates clear the slow note');
 });
 test('Restore waits for an in-flight update, then clears without a late restart', async t => {
   const f = await fixture(t); await f.start(); let finish;
