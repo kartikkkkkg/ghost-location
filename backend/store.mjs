@@ -2,7 +2,7 @@ import { mkdir, readFile, writeFile, rename, copyFile } from 'node:fs/promises';
 import { dirname } from 'node:path';
 
 export const defaults = () => ({
-  schemaVersion: 1, savedPlaces: [], recentPlaces: [], session: null,
+  schemaVersion: 1, savedPlaces: [], recentPlaces: [], savedRoutes: [], routeHistory: [], session: null,
   preferences: {
     restoreOnQuit: true,
     connection: 'usb',

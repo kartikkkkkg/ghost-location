@@ -1,7 +1,7 @@
 import { EventEmitter } from 'node:events';
 import { randomUUID } from 'node:crypto';
 import { place, text, geocoderUrl } from './validation.mjs';
-import { Router, measurePath, pointAlong, ROUTE_SPEED_MPS } from './routing.mjs';
+import { Router, measurePath, pointAlong, mphToMps, buildPaceProfile, paceFactorAt, routeMode, routeSpeedMph } from './routing.mjs';
 
 const REPLACEABLE_SESSION_STATUSES = new Set(['unknown', 'waiting', 'error']);
 const USABLE_REPLACEMENT_STATES = new Set(['ready', 'setup-required']);
@@ -9,7 +9,7 @@ const USABLE_REPLACEMENT_STATES = new Set(['ready', 'setup-required']);
 export class Controller extends EventEmitter {
   constructor({ adapters, store, now = Date.now, router = new Router(), clock = () => performance.now(), network = async () => ({wifi: false}) }) {
     super(); this.adapters = adapters; this.store = store;
-    this.state = { devices: [], runtime: {}, session: null, savedPlaces: [], recentPlaces: [], preferences: {}, busy: false, warning: null };
+    this.state = { devices: [], runtime: {}, session: null, savedPlaces: [], recentPlaces: [], savedRoutes: [], routeHistory: [], preferences: {}, busy: false, warning: null };
     this.scanning = null;
     this.now = now; this.network = network; this.networkCheckedAt = -Infinity;
     this.resumeSessionId = null;
@@ -39,8 +39,8 @@ export class Controller extends EventEmitter {
   snapshot() { return structuredClone(this.state); }
   notify() { this.emit('state', this.snapshot()); }
   async persist() {
-    const { savedPlaces, recentPlaces, session, preferences } = this.state;
-    await this.store.save({ schemaVersion: 1, savedPlaces, recentPlaces, session, preferences });
+    const { savedPlaces, recentPlaces, savedRoutes, routeHistory, session, preferences } = this.state;
+    await this.store.save({ schemaVersion: 1, savedPlaces, recentPlaces, savedRoutes, routeHistory, session, preferences });
   }
   async exclusive(fn) {
     if (this.state.busy) throw new Error('Wait for the current device operation to finish.');
@@ -96,7 +96,7 @@ export class Controller extends EventEmitter {
         this.notify(); return this.snapshot();
       }
       active.status = this.canResume(active) ? 'waiting' : 'unknown';
-      this.pauseRouteMotion('Phone disconnected. Resume the route after this phone reconnects.');
+      this.pauseRouteMotion('Phone disconnected. The route resumes on its own when this phone reconnects.', { autoResume: true });
       active.autoReconnect = this.canResume(active);
       active.message = active.autoReconnect ? 'Phone disconnected. Waiting to reconnect this phone and resume the selected location.' : 'Phone disconnected. Connect this phone, then retry the location or restore it.';
       this.retryAt = 0;
@@ -186,7 +186,7 @@ export class Controller extends EventEmitter {
       const resumeMotion = () => {
         if (wasRunning && this.state.route?.status === 'paused' && this.state.session?.status === 'active' && !this.closing && !this.suspended) {
           this.state.route.status = 'running';
-          this.state.route.message = 'Following the road at 45 mph. Sending a location every second.';
+          this.state.route.message = this.routeMessage(this.state.route);
           this.routeStepAt = this.clock(); this.scheduleRouteTick();
         }
       };
@@ -292,7 +292,9 @@ export class Controller extends EventEmitter {
       // Journal before device mutation, so a crash cannot discard an unresolved session.
       try { await this.persist(); }
       catch (error) { this.state.session = previous; throw error; }
-      this.state.route = route ? { id: route.id, deviceId: device.id, status: 'starting', speedMph: 45, distanceMeters: route.distanceMeters, traveledMeters: 0, remainingSeconds: route.durationSeconds, point, message: 'Sending the route start to your phone…' } : null;
+      const previousRoute = this.state.route;
+      if (previousRoute && previousRoute.status !== 'completed' && (previousRoute.traveledMeters || 0) > 0) await this.recordRouteHistory(previousRoute, false);
+      this.state.route = route ? { id: route.id, deviceId: device.id, status: 'starting', mode: route.mode || 'drive', speedMph: route.speedMph ?? 45, pacing: route.pacing !== false, loop: Boolean(route.loop), loops: 0, imported: Boolean(route.imported), waypoints: route.waypoints || [], startedAt: new Date(this.now()).toISOString(), distanceMeters: route.distanceMeters, traveledMeters: 0, remainingSeconds: route.durationSeconds, point, message: 'Sending the route start to your phone…' } : null;
       this.notify();
       this.resumeSessionId = wasLive ? current.id : null;
       this.retryAt = 0; this.retryAttempts = 0;
@@ -337,7 +339,10 @@ export class Controller extends EventEmitter {
       try {
         if (recovering) await this.adapters[device.platform].reset?.(device);
         await this.adapters[device.platform].clear(device);
-        this.state.session = null; await this.persist(); this.state.route = null; return this.snapshot();
+        const finishedRoute = this.state.route;
+        this.state.session = null; await this.persist(); this.state.route = null;
+        if (finishedRoute && finishedRoute.status !== 'completed' && (finishedRoute.traveledMeters || 0) > 0) await this.recordRouteHistory(finishedRoute, false);
+        return this.snapshot();
       } catch (error) {
         this.state.session = session;
         session.status = 'unknown'; session.message = `Restoration could not be confirmed: ${error.message}`;
@@ -348,7 +353,7 @@ export class Controller extends EventEmitter {
   async sessionEnded({ deviceId, sessionId, error, retry = true }) {
     const current = this.state.session;
     if (current?.deviceId !== deviceId || (sessionId && sessionId !== current.id) || current.status === 'stopping') return;
-    this.pauseRouteMotion('Connection interrupted. Resume the route after this phone reconnects.');
+    this.pauseRouteMotion('Connection interrupted. The route resumes on its own when this phone reconnects.', { autoResume: true });
     if (!retry) this.resumeSessionId = null;
     current.autoReconnect = this.canResume(current);
     current.status = current.autoReconnect ? 'waiting' : 'unknown';
@@ -416,6 +421,15 @@ export class Controller extends EventEmitter {
         if (['unknown', 'waiting'].includes(current.status)) throw new Error(current.message);
         this.confirmActive(current, result);
         await this.persist();
+        const route = this.state.route;
+        if (route?.status === 'paused' && route.resumeOnReconnect && route.deviceId === current.deviceId && !this.closing && !this.suspended) {
+          route.resumeOnReconnect = false;
+          route.status = 'running';
+          route.message = `Reconnected and resumed. ${this.routeMessage(route)}`;
+          this.routeStepAt = this.clock();
+          this.scheduleRouteTick();
+          this.notify();
+        }
       } catch (error) {
         current.status = 'waiting'; current.message = `Reconnect failed: ${error.message} Roam will retry while this phone is available.`;
         this.scheduleRetry(current);
@@ -431,13 +445,111 @@ export class Controller extends EventEmitter {
   }
   async resume() { this.suspended = false; return this.scanDevices(); }
   getRoute() { return this.plannedRoute ? structuredClone(this.plannedRoute) : null; }
-  async planRoute(waypoints) {
+  routeMessage(route) {
+    const verb = { walk: 'Walking', cycle: 'Cycling', drive: 'Driving' }[route?.mode] || 'Driving';
+    return `${verb} at ${route?.speedMph ?? 45} mph. Sending a location every second.`;
+  }
+  async planRoute(input) {
     if (this.state.busy || (this.state.route && this.state.session)) throw new Error('Finish the current operation and restore real location before changing the route.');
-    const route = await this.router.plan(waypoints);
+    const { waypoints, mode, speedMph, pacing, loop } = Array.isArray(input) ? { waypoints: input } : (input || {});
+    const route = await this.router.plan(waypoints, { mode, speedMph });
     if (this.state.busy || (this.state.route && this.state.session)) throw new Error('Finish the current operation and restore real location before changing the route.');
+    route.mode = routeMode(route.mode || mode || 'drive');
+    route.speedMph = routeSpeedMph(route.mode, speedMph ?? route.speedMph);
+    route.pacing = pacing !== false;
+    route.loop = Boolean(loop);
     this.plannedRoute = route;
     this.routePath = measurePath(route.coordinates);
+    this.paceProfile = route.pacing ? buildPaceProfile(this.routePath, route.mode) : null;
     return this.getRoute();
+  }
+  async importRoute(input) {
+    if (this.state.busy || (this.state.route && this.state.session)) throw new Error('Finish the current operation and restore real location before changing the route.');
+    if (!input || !Array.isArray(input.coordinates)) throw new Error('Choose a GPX file with a track or route.');
+    const mode = routeMode(input.mode || 'drive');
+    const speedMph = routeSpeedMph(mode, input.speedMph);
+    const measured = measurePath(input.coordinates.map(pair => {
+      if (!Array.isArray(pair) || pair.length !== 2) throw new Error('The GPX file contains an invalid point.');
+      return [Number(pair[0]), Number(pair[1])];
+    }));
+    const label = typeof input.label === 'string' && input.label.trim() ? text(input.label).slice(0, 120) : 'Imported route';
+    const first = measured.coordinates[0], last = measured.coordinates.at(-1);
+    const route = {
+      id: randomUUID(), imported: true, mode, speedMph,
+      pacing: input.pacing !== false, loop: Boolean(input.loop),
+      waypoints: [
+        { latitude: first[1], longitude: first[0], label },
+        { latitude: last[1], longitude: last[0], label: 'Route end' },
+      ],
+      coordinates: measured.coordinates,
+      distanceMeters: measured.distanceMeters,
+      durationSeconds: measured.distanceMeters / mphToMps(speedMph),
+    };
+    this.plannedRoute = route;
+    this.routePath = measured;
+    this.paceProfile = route.pacing ? buildPaceProfile(measured, mode) : null;
+    return this.getRoute();
+  }
+  async saveRoute(input) {
+    if (!input || typeof input !== 'object') throw new Error('Invalid route.');
+    const name = text(input.name || '').slice(0, 80);
+    if (!name) throw new Error('Name the route first.');
+    const mode = routeMode(input.mode || 'drive');
+    const record = {
+      id: typeof input.id === 'string' && this.state.savedRoutes.some(r => r.id === input.id) ? input.id : randomUUID(),
+      name, mode, speedMph: routeSpeedMph(mode, input.speedMph),
+      pacing: input.pacing !== false, loop: Boolean(input.loop),
+      waypoints: Array.isArray(input.waypoints) ? input.waypoints.map(p => place(p)) : [],
+    };
+    if (input.coordinates) {
+      const measured = measurePath(input.coordinates.map(pair => [Number(pair?.[0]), Number(pair?.[1])]));
+      record.coordinates = measured.coordinates;
+      if (record.waypoints.length < 2) {
+        record.waypoints = [
+          { latitude: measured.coordinates[0][1], longitude: measured.coordinates[0][0], label: name },
+          { latitude: measured.coordinates.at(-1)[1], longitude: measured.coordinates.at(-1)[0], label: 'Route end' },
+        ];
+      }
+    }
+    if (record.waypoints.length < 2 || record.waypoints.length > 12) throw new Error('A saved route needs between 2 and 12 stops.');
+    if (input.id == null && this.state.savedRoutes.length >= 50) throw new Error('You can save up to 50 routes.');
+    this.state.savedRoutes = [record, ...this.state.savedRoutes.filter(r => r.id !== record.id)];
+    await this.persist(); this.notify(); return this.snapshot();
+  }
+  async deleteRoute(id) {
+    this.state.savedRoutes = this.state.savedRoutes.filter(r => r.id !== id);
+    await this.persist(); this.notify(); return this.snapshot();
+  }
+  async startSavedRoute(id, deviceId) {
+    const saved = this.state.savedRoutes.find(r => r.id === id);
+    if (!saved) throw new Error('That saved route no longer exists.');
+    if (saved.coordinates) await this.importRoute({ coordinates: saved.coordinates, label: saved.name, mode: saved.mode, speedMph: saved.speedMph, pacing: saved.pacing, loop: saved.loop });
+    else await this.planRoute({ waypoints: saved.waypoints, mode: saved.mode, speedMph: saved.speedMph, pacing: saved.pacing, loop: saved.loop });
+    return this.startRoute({ deviceId, routeId: this.plannedRoute.id });
+  }
+  async replayRoute(id) {
+    const entry = this.state.routeHistory.find(r => r.id === id);
+    if (!entry) throw new Error('That route is no longer in the history.');
+    if (entry.coordinates) return this.importRoute({ coordinates: entry.coordinates, label: entry.label, mode: entry.mode, speedMph: entry.speedMph, pacing: entry.pacing, loop: entry.loop });
+    return this.planRoute({ waypoints: entry.waypoints, mode: entry.mode, speedMph: entry.speedMph, pacing: entry.pacing, loop: entry.loop });
+  }
+  async recordRouteHistory(route, completed) {
+    if (!route?.waypoints?.length || !(route.distanceMeters > 0)) return;
+    const entry = {
+      id: randomUUID(),
+      label: `${route.waypoints[0].label || 'Start'} → ${route.waypoints.at(-1).label || 'End'}`,
+      mode: route.mode || 'drive', speedMph: route.speedMph ?? 45,
+      pacing: route.pacing !== false, loop: Boolean(route.loop),
+      waypoints: route.waypoints,
+      ...(route.imported && this.plannedRoute?.id === route.id ? { coordinates: this.plannedRoute.coordinates } : {}),
+      distanceMeters: route.distanceMeters,
+      traveledMeters: route.traveledMeters || 0,
+      completed: Boolean(completed),
+      startedAt: route.startedAt || new Date(this.now()).toISOString(),
+      endedAt: new Date(this.now()).toISOString(),
+    };
+    this.state.routeHistory = [entry, ...this.state.routeHistory].slice(0, 20);
+    await this.persist();
   }
   async startRoute({ deviceId, routeId } = {}) {
     const route = this.plannedRoute;
@@ -446,18 +558,22 @@ export class Controller extends EventEmitter {
     await this.applyLocation({ deviceId, ...pointAlong(this.routePath, 0), label: `Route to ${route.waypoints.at(-1).label}` }, route);
     if (this.closing || this.suspended || this.state.session?.status !== 'active' || this.state.route?.status !== 'starting') return this.snapshot();
     this.state.route.status = 'running';
-    this.state.route.message = 'Following the road at 45 mph. Sending a location every second.';
+    this.state.route.message = this.routeMessage(this.state.route);
     this.routeStepAt = this.clock();
     this.scheduleRouteTick(); this.notify(); return this.snapshot();
   }
-  pauseRouteMotion(message = 'Paused. Your phone holds the last route location.') {
+  pauseRouteMotion(message = 'Paused. Your phone holds the last route location.', { autoResume = false } = {}) {
     clearTimeout(this.routeTimer); this.routeTimer = null;
     if (this.state.route && ['running', 'starting'].includes(this.state.route.status)) {
       this.state.route.status = 'paused'; this.state.route.message = message;
+      if (autoResume) this.state.route.resumeOnReconnect = true;
+      this.state.route.speedNow = 0; this.state.route.dwellMs = 0;
     }
   }
   async pauseRoute() {
-    this.pauseRouteMotion(); this.notify();
+    this.pauseRouteMotion();
+    if (this.state.route) this.state.route.resumeOnReconnect = false;
+    this.notify();
     if (this.routeUpdate) await this.routeUpdate;
     await this.persist(); this.notify(); return this.snapshot();
   }
@@ -479,7 +595,7 @@ export class Controller extends EventEmitter {
           await this.sessionEnded({ deviceId: current.deviceId, sessionId: current.id, error: error.message }); throw error;
         }
       }
-      route.status = 'running'; route.message = 'Following the road at 45 mph. Sending a location every second.';
+      route.status = 'running'; route.message = this.routeMessage(route); route.resumeOnReconnect = false;
       this.routeStepAt = this.clock(); this.scheduleRouteTick();
     });
   }
@@ -491,12 +607,34 @@ export class Controller extends EventEmitter {
     }); }, delay);
     this.routeTimer.unref?.();
   }
+  advanceRoute(route, elapsedMs) {
+    const cruise = mphToMps(route.speedMph ?? 45);
+    const from = route.traveledMeters;
+    if (!route.pacing || !this.paceProfile) return Math.min(route.distanceMeters, from + cruise * elapsedMs / 1000);
+    if (route.dwellMs > 0) {
+      route.dwellMs = Math.max(0, route.dwellMs - elapsedMs);
+      route.speedNow = 0;
+      return from;
+    }
+    const dt = elapsedMs / 1000;
+    const accel = route.mode === 'walk' ? 0.9 : route.mode === 'cycle' ? 1.6 : 2.4;
+    const target = cruise * paceFactorAt(this.paceProfile, from);
+    let speed = route.speedNow ?? 0;
+    const delta = target - speed;
+    const maxDelta = accel * dt;
+    speed += Math.abs(delta) <= maxDelta ? delta : Math.sign(delta) * maxDelta;
+    route.speedNow = speed;
+    let to = from + speed * dt;
+    const stop = this.paceProfile.stops.find(s => s.at > from + 0.01 && s.at <= to);
+    if (stop) { to = stop.at; route.dwellMs = stop.dwellSeconds * 1000; route.speedNow = 0; }
+    return Math.min(route.distanceMeters, to);
+  }
   async tickRoute() {
     const route = this.state.route, current = this.state.session;
     if (this.routeUpdate || route?.status !== 'running') return;
     if (this.state.busy) { this.scheduleRouteTick(100); return; }
     if (this.suspended || this.closing || current?.status !== 'active' || current.deviceId !== route.deviceId) {
-      this.pauseRouteMotion('Connection interrupted. Reconnect this phone before resuming.'); this.notify(); return;
+      this.pauseRouteMotion('Connection interrupted. The route resumes on its own when this phone reconnects.', { autoResume: true }); this.notify(); return;
     }
     const started = this.clock(), elapsed = started - this.routeStepAt;
     if (elapsed < 1000) { this.scheduleRouteTick(1000 - elapsed); return; }
@@ -505,12 +643,18 @@ export class Controller extends EventEmitter {
     const operation = async () => {
       try {
         const device = this.device(current.deviceId);
-        const distance = Math.min(route.distanceMeters, route.traveledMeters + ROUTE_SPEED_MPS * elapsed / 1000);
+        let distance = this.advanceRoute(route, elapsed);
+        if (route.loop && distance >= route.distanceMeters) {
+          route.loops = (route.loops || 0) + 1;
+          route.traveledMeters = 0; route.speedNow = 0; route.dwellMs = 0;
+          distance = 0;
+          route.message = `Looping · lap ${route.loops + 1}. ${this.routeMessage(route)}`;
+        }
         const point = pointAlong(this.routePath, distance);
         // Record the attempted point before sending. Recovery holds this point;
         // it never advances the route while transport state is uncertain.
         Object.assign(current, point);
-        Object.assign(route, { point, traveledMeters: distance, remainingSeconds: (route.distanceMeters - distance) / ROUTE_SPEED_MPS });
+        Object.assign(route, { point, traveledMeters: distance, remainingSeconds: (route.distanceMeters - distance) / mphToMps(route.speedMph ?? 45) });
         const adapter = this.adapters[device.platform];
         const result = await (adapter.update ? adapter.update(device, { ...point, sessionId: current.id }) : adapter.set(device, { ...point, sessionId: current.id }));
         if (this.state.session !== current || current.status !== 'active' || this.closing) return;
@@ -519,7 +663,7 @@ export class Controller extends EventEmitter {
         current.refreshIntervalMs = 1000; current.refreshSource = 'command-ack';
         if (distance >= route.distanceMeters) {
           route.status = 'completed'; route.message = 'Arrived. Your phone holds the destination until you restore real location.';
-          await this.persist();
+          await this.recordRouteHistory(route, true);
         } else if (this.clock() - started >= 1000) {
           this.pauseRouteMotion('Location updates are taking longer than a second. Check the connection, then resume.');
           await this.persist();
