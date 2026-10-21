@@ -95,6 +95,13 @@
   .speed-field input { width: 64px; padding: 8px 9px; border: 1px solid var(--line); border-radius: 10px; font-size: 15px; color: var(--ink); background: #fbfbfc; }
   .check { display: flex; align-items: center; gap: 6px; font-size: 13.5px; font-weight: 550; }
   .check input { width: 17px; height: 17px; accent-color: var(--accent); }
+  .route-stops { display: flex; flex-direction: column; gap: 6px; margin-top: 11px; }
+  .route-stops:empty { margin-top: 0; }
+  .route-stop { display: flex; align-items: center; gap: 9px; background: #f6f7f9; border: 1px solid var(--line); border-radius: 11px; padding: 8px 11px; font-size: 13.5px; }
+  .route-stop .num { width: 20px; height: 20px; border-radius: 50%; background: var(--accent); color: #fff; font-size: 11.5px; font-weight: 700; display: grid; place-items: center; flex: none; }
+  .route-stop span.label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 550; }
+  .route-stop small { color: var(--muted); flex: none; }
+  .route-stop .rm { border: none; background: none; color: var(--muted); font-size: 15px; flex: none; padding: 2px 4px; }
   .route-status { font-size: 13px; color: var(--muted); margin: 10px 2px 0; line-height: 1.45; }
   .route-status strong { color: var(--ink); }
   .progress { height: 6px; border-radius: 3px; background: #eceef1; overflow: hidden; margin-top: 9px; }
@@ -185,8 +192,13 @@
         <label class="check"><input id="pacing" type="checkbox" checked /> Realistic pacing</label>
         <label class="check"><input id="loop" type="checkbox" /> Loop</label>
       </div>
-      <div class="row" style="margin-top:12px">
-        <button id="route" class="secondary" disabled>Drive here</button>
+      <div id="route-stops" class="route-stops"></div>
+      <div class="row" style="margin-top:10px">
+        <button id="add-stop" class="secondary" disabled>Add pin to route</button>
+        <button id="drive-route" class="secondary" disabled>Drive route</button>
+      </div>
+      <div class="row" style="margin-top:9px">
+        <button id="route" class="secondary" disabled>Drive here from current spot</button>
         <button id="route-toggle" class="secondary" hidden>Pause route</button>
       </div>
       <div id="route-progress" class="progress" hidden><div style="width:0%"></div></div>
@@ -222,6 +234,7 @@ let pendingAction = false;
 let toastTimer = null;
 let routeMode = 'drive';
 let speedEdited = false;
+let routeStops = [];
 let drawnRouteId = null;
 const MODE_DEFAULTS = { walk: 3, cycle: 12, drive: 45 };
 const MODE_VERBS = { walk: 'Walking', cycle: 'Cycling', drive: 'Driving' };
@@ -356,8 +369,14 @@ function render() {
   apply.textContent = pendingAction ? 'Working…' : ownSession ? 'Update location' : 'Set location';
 
   // Route card
+  const routeBusy = Boolean(route && ['running', 'paused', 'starting'].includes(route.status));
   const drive = $('#route');
-  drive.disabled = !pending || !ownSession || pendingAction || (route && ['running', 'paused', 'starting'].includes(route.status));
+  drive.disabled = !pending || !ownSession || pendingAction || routeBusy;
+  const stopsEl = $('#route-stops');
+  stopsEl.innerHTML = routeStops.map((stop, i) => `<div class="route-stop"><span class="num">${i + 1}</span><span class="label">${esc(stop.label)}</span><small>${i === 0 ? 'Start' : i === routeStops.length - 1 ? 'Destination' : 'Via'}</small><button class="rm" data-rm-stop="${i}" aria-label="Remove stop ${i + 1}" ${routeBusy || pendingAction ? 'disabled' : ''}>✕</button></div>`).join('');
+  for (const button of stopsEl.querySelectorAll('[data-rm-stop]')) button.addEventListener('click', () => { routeStops.splice(Number(button.dataset.rmStop), 1); render(); });
+  $('#add-stop').disabled = !pending || pendingAction || routeBusy || routeStops.length >= 12;
+  $('#drive-route').disabled = routeStops.length < 2 || !deviceReady || pendingAction || routeBusy || Boolean(session && !ownSession);
   const toggle = $('#route-toggle');
   if (route && (route.status === 'running' || route.status === 'paused')) {
     toggle.hidden = false;
@@ -378,7 +397,11 @@ function render() {
         : `<strong>${verb} at ${route.speedMph ?? 45} mph</strong> · ${fmtDistance(route.traveledMeters || 0)} of ${fmtDistance(route.distanceMeters)}${route.remainingSeconds != null ? ` · about ${fmtTime(route.remainingSeconds)} left` : ''}${route.loop ? ` · Lap ${1 + (route.loops || 0)}` : ''}`;
   } else {
     progress.hidden = true;
-    status.textContent = ownSession ? 'Pick a destination pin, then drive there from the current location.' : 'Set a location first, then drive from it to any pin.';
+    status.textContent = routeStops.length >= 2
+      ? 'Route stops are ready. Press Drive route to start.'
+      : ownSession
+        ? 'Pick a destination pin, then drive there from the current location — or add pins to build a route.'
+        : 'Drop a pin and add it to the route. Two or more stops make a route you can drive — no need to set a location first.';
   }
 
   // Saved routes
@@ -440,6 +463,23 @@ $('#route').addEventListener('click', async () => {
     const { route } = await post('/api/route/plan', { waypoints: [origin, pending], mode: routeMode, speedMph: speedValue(), pacing: $('#pacing').checked, loop: $('#loop').checked });
     drawnRouteId = null;
     adopt(await post('/api/route/start', { deviceId: selectedDeviceId, routeId: route.id, mode: routeMode, speedMph: speedValue(), pacing: $('#pacing').checked, loop: $('#loop').checked }));
+    toast('Route started.');
+  } catch (error) { toast(error.message, true); }
+  finally { pendingAction = false; render(); }
+});
+$('#add-stop').addEventListener('click', () => {
+  if (!pending || routeStops.length >= 12) return;
+  routeStops.push({ ...pending });
+  render();
+});
+$('#drive-route').addEventListener('click', async () => {
+  if (routeStops.length < 2 || pendingAction) return;
+  pendingAction = true; render();
+  try {
+    const options = { mode: routeMode, speedMph: speedValue(), pacing: $('#pacing').checked, loop: $('#loop').checked };
+    const { route } = await post('/api/route/plan', { waypoints: routeStops, ...options });
+    drawnRouteId = null;
+    adopt(await post('/api/route/start', { deviceId: selectedDeviceId, routeId: route.id, ...options }));
     toast('Route started.');
   } catch (error) { toast(error.message, true); }
   finally { pendingAction = false; render(); }
