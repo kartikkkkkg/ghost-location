@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.2.0 (unreleased)
+
+- Renamed the app from Ghost to **Roam**. Settings, saved places and session
+  recovery carry over from the Ghost data folder automatically on first run.
+- Add LAN web control: set locations, drive routes and restore from the
+  phone's own browser on the same Wi-Fi (Settings → Web control, PIN-gated).
+- Fix iPhone Wi-Fi discovery going stale when iOS rotates its private Wi-Fi
+  MAC address; devices are now matched by UDID.
+- Fix the Set/Update location button staying disabled for Wi-Fi phones.
+
 ## 0.1.7
 
 - Offer Switch to Wi-Fi after a working USB session when the computer has an active Wi-Fi interface.

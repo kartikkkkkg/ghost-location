@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-<title>Ghost — Web control</title>
+<title>Roam — Web control</title>
 <link rel="stylesheet" href="/vendor/leaflet.css" />
 <style>
   :root { color-scheme: light; --ink: #1d1d1f; --muted: #6e6e73; --line: #e3e5e8; --accent: #111; --danger: #b3261e; --ok: #137333; }
@@ -46,9 +46,9 @@
 </head>
 <body>
 <div id="login" hidden>
-  <div style="font-size:34px">👻</div>
-  <h1 style="font-size:22px;margin:8px 0 4px">Ghost web control</h1>
-  <p class="note" style="text-align:center">Enter the 6-digit PIN shown in the Ghost app on your computer, under Settings → Web control.</p>
+  <div style="font-size:34px">🧭</div>
+  <h1 style="font-size:22px;margin:8px 0 4px">Roam web control</h1>
+  <p class="note" style="text-align:center">Enter the 6-digit PIN shown in the Roam app on your computer, under Settings → Web control.</p>
   <form id="login-form">
     <input id="pin" inputmode="numeric" autocomplete="one-time-code" pattern="[0-9]{6}" maxlength="6" placeholder="••••••" aria-label="PIN" />
     <button class="primary" style="width:100%" type="submit">Connect</button>
@@ -58,13 +58,13 @@
 
 <div id="app" hidden>
   <header>
-    <span class="logo">👻 Ghost</span>
+    <span class="logo">🧭 Roam</span>
     <span id="session-status" class="status">Not connected</span>
   </header>
   <main>
     <h2>Phone</h2>
     <div id="devices" class="chips"></div>
-    <p id="no-devices" class="note" hidden>No phone is connected to Ghost yet. Connect one in the desktop app, then pull to refresh this page.</p>
+    <p id="no-devices" class="note" hidden>No phone is connected to Roam yet. Connect one in the desktop app, then pull to refresh this page.</p>
 
     <h2>Destination</h2>
     <div class="search">

@@ -1,4 +1,4 @@
-"""Ghost iOS bridge: private JSONL stdin/stdout, one explicitly selected USB or Wi-Fi DVT session.
+"""Roam iOS bridge: private JSONL stdin/stdout, one explicitly selected USB or Wi-Fi DVT session.
 
 No request is acknowledged until the awaited upstream operation completes.
 The DVT set selector expects a device reply; clear is an upstream no-reply selector.
@@ -219,7 +219,7 @@ class Bridge:
             # Cache the existing trusted record for authenticated Bonjour discovery.
             await lockdown.save_pair_record()
             await lockdown.set_enable_wifi_connections(True)
-        return {"enabled": True, "message": "Wi-Fi enabled. Keep both devices on the same network, then choose Wi-Fi in Ghost."}
+        return {"enabled": True, "message": "Wi-Fi enabled. Keep both devices on the same network, then choose Wi-Fi in Roam."}
 
     async def prepare(self, udid):
         async with await connection_lockdown(udid, autopair=True) as lockdown:

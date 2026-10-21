@@ -61,7 +61,7 @@ export class Router {
     const url = `https://router.project-osrm.org/route/v1/driving/${coordinates}?overview=full&geometries=geojson&steps=false&alternatives=false&radiuses=${waypoints.map(() => 1000).join(';')}`;
     let data;
     try {
-      const response = await this.fetcher(url, { signal: AbortSignal.timeout(20000), headers: { 'User-Agent': 'GhostLocation/0.1.5', Accept: 'application/json' } });
+      const response = await this.fetcher(url, { signal: AbortSignal.timeout(20000), headers: { 'User-Agent': 'RoamLocation/0.2', Accept: 'application/json' } });
       if (!response.ok) throw new Error(`Routing service returned HTTP ${response.status}.`);
       const body = await response.text();
       if (body.length > 8_000_000) throw new Error('Route is too large. Choose a shorter path.');

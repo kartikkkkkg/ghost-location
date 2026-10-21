@@ -299,7 +299,7 @@ export class Controller extends EventEmitter {
       try {
         if (recovering) await this.adapters[device.platform].reset?.(device);
         const result = await this.adapters[device.platform].set(device, { ...point, sessionId: current.id, reconnecting: Boolean(recovering) });
-        if (this.closing) throw new Error('Ghost is closing; this session must be checked when it reopens.');
+        if (this.closing) throw new Error('Roam is closing; this session must be checked when it reopens.');
         if (['unknown', 'waiting'].includes(current.status)) throw new Error(current.message);
         this.confirmActive(current, result);
         this.state.recentPlaces = [{ id: randomUUID(), ...point, usedAt: new Date().toISOString() }, ...this.state.recentPlaces.filter(p => p.latitude !== point.latitude || p.longitude !== point.longitude)].slice(0, 12);
@@ -353,7 +353,7 @@ export class Controller extends EventEmitter {
     current.autoReconnect = this.canResume(current);
     current.status = current.autoReconnect ? 'waiting' : 'unknown';
     current.message = error || 'The device connection ended.';
-    if (current.autoReconnect) current.message += ' Ghost will reconnect this phone and resume the selected location.';
+    if (current.autoReconnect) current.message += ' Roam will reconnect this phone and resume the selected location.';
     this.retryAt = 0;
     try { await this.persist(); } catch { this.state.warning = 'Could not save session recovery state.'; }
     this.notify();
@@ -417,7 +417,7 @@ export class Controller extends EventEmitter {
         this.confirmActive(current, result);
         await this.persist();
       } catch (error) {
-        current.status = 'waiting'; current.message = `Reconnect failed: ${error.message} Ghost will retry while this phone is available.`;
+        current.status = 'waiting'; current.message = `Reconnect failed: ${error.message} Roam will retry while this phone is available.`;
         this.scheduleRetry(current);
         await this.persist();
       }

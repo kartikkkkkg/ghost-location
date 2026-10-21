@@ -73,11 +73,11 @@ clear before closing by default. `shutdown` with `params.restore:false` closes
 the transport without sending clear; this does not guarantee the OS will retain
 the simulated location. The adapter exposes this as `dispose({restore:false})`.
 An interrupted live session can be automatically reconnected by the desktop
-controller while the same Ghost process stays open. Recovery is limited to the
+controller while the same Roam process stays open. Recovery is limited to the
 same device and last applied target; a newly selected preview pin is not applied
 automatically. Restore cancels automatic recovery, even when USB is absent, and
 waits for an in-progress recovery operation before clearing the simulation.
-After Ghost restarts, the recovery journal requires an explicit Retry location
+After Roam restarts, the recovery journal requires an explicit Retry location
 or Restore. Neither disconnect nor process exit guarantees that real location
 has resumed.
 

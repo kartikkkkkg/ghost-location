@@ -21,7 +21,7 @@ app.whenReady().then(async () => {
   );
 
   const window = new BrowserWindow({
-    title: 'Ghost renderer fixture — no phone connection',
+    title: 'Roam renderer fixture — no phone connection',
     width: 1440,
     height: 940,
     show: false,

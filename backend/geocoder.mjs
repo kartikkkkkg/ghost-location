@@ -24,7 +24,7 @@ export class Geocoder {
       let response;
       try {
         response = await this.fetch(url, {
-          headers: { 'User-Agent': 'GhostLocation/0.1 (USB location simulator)', Accept: 'application/json' },
+          headers: { 'User-Agent': 'RoamLocation/0.2 (USB location simulator)', Accept: 'application/json' },
           signal: AbortSignal.timeout(12000)
         });
       } catch { throw new Error('Place search is unavailable. Check your connection, or choose a pin on the map.'); }

@@ -52,7 +52,7 @@ test('serves the control page and vendored Leaflet without login', async (t) => 
   const { base } = await startServer(t);
   const page = await fetch(`${base}/`);
   assert.equal(page.status, 200);
-  assert.match(await page.text(), /Ghost web control/);
+  assert.match(await page.text(), /Roam web control/);
   const leaflet = await fetch(`${base}/vendor/leaflet.js`);
   assert.equal(leaflet.status, 200);
   assert.match(leaflet.headers.get('content-type'), /javascript/);

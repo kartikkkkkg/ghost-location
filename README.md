@@ -1,4 +1,4 @@
-# Ghost
+# Roam
 
 A small Electron app for setting a fixed phone location or following a road route over USB or Wi-Fi. Search for a
 place, drop a pin, or enter coordinates, then explicitly apply it to your selected
@@ -8,16 +8,16 @@ Android adapter.
 Current version: **0.1.7**. See [CHANGELOG.md](CHANGELOG.md) for the onboarding,
 interface, Android cleanup, Windows packaging, recovery-record, and reconnection changes.
 
-![Ghost following an example road route in Chicago](docs/images/ghost-route.png)
+![Roam following an example road route in Chicago](docs/images/ghost-route.png)
 
 *Route mode in the actual interface, using an example phone and sample Chicago route.*
 
 ## Download and install
 
-Get [Ghost 0.1.7 for Mac or Windows](https://github.com/Blueturboguy07/ghost-location/releases/tag/v0.1.7).
+Get [Roam 0.1.7 for Mac or Windows](https://github.com/Blueturboguy07/ghost-location/releases/tag/v0.1.7).
 Follow the [setup guide](SETUP.md) for Mac → iPhone, Windows → iPhone, Mac → Android, or Windows → Android, or use [Publik's guided install](https://publikhq.com/ghost/install).
 
-The downloads include the phone runtimes. No programming tools or Ghost account are needed. These early releases are unsigned; the guide explains opening them and the limits of current device testing.
+The downloads include the phone runtimes. No programming tools or Roam account are needed. These early releases are unsigned; the guide explains opening them and the limits of current device testing.
 
 ## Features
 
@@ -26,10 +26,10 @@ The downloads include the phone runtimes. No programming tools or Ghost account 
 - Interactive map, manual place search, draggable pin, and latitude/longitude input.
 - First-run Mac/Windows and iPhone/Android survey with a checklist tailored to all four USB configurations.
 - Saved places and recent selections stored locally.
-- A one-click USB → Wi-Fi handoff keeps the current location and resumes routes. Ghost offers it after a working USB session when the computer has Wi-Fi. Android 11+ also supports cable-free pairing.
+- A one-click USB → Wi-Fi handoff keeps the current location and resumes routes. Roam offers it after a working USB session when the computer has Wi-Fi. Android 11+ also supports cable-free pairing.
 - iPhone location simulation through a bundled pymobiledevice3 sidecar.
 - Android location simulation through bundled ADB and Appium Settings.
-- Ongoing fixed-location updates and same-phone reconnection while Ghost stays open.
+- Ongoing fixed-location updates and same-phone reconnection while Roam stays open.
 - Automatic stale recovery-record cleanup when a different usable USB phone appears.
 - Explicit restoration, normal-quit cleanup, and a persisted recovery journal.
 - Honest disconnected/error states: lost connectivity never means “restored”.
@@ -57,19 +57,19 @@ available inside Electron. For a production renderer inside Electron: `npm start
 
 ## Device setup
 
-On first launch, choose the computer and phone you use. Ghost saves that choice
+On first launch, choose the computer and phone you use. Roam saves that choice
 locally and shows only the relevant setup checklist. Open **Setup** in the toolbar
 or **Change** in Settings to review or switch configurations later.
 
 **iPhone (initial target: iOS 17.4+):** connect with a USB data cable, unlock and
 trust the computer, enable Developer Mode in Settings → Privacy & Security, and
-restart when requested. Use Ghost's Prepare action to mount the developer support
+restart when requested. Use Roam's Prepare action to mount the developer support
 image. Initial preparation requires internet and can take a few minutes. Windows
 also needs Apple's USB services/drivers (upstream recommends Microsoft Store
 iTunes). The application does not remove passcodes or change Find My settings.
 
 **Android (8.0+):** enable Developer options and USB debugging, connect a USB data
-cable, and approve the computer's RSA prompt. Ghost's explicit Prepare action
+cable, and approve the computer's RSA prompt. Roam's explicit Prepare action
 installs Appium Settings, grants location access, and selects it as the mock-location
 provider. Follow any additional device-specific prompts. Some Windows phones need
 the manufacturer's ADB USB driver. No root is required by this approach.
@@ -79,14 +79,14 @@ the manufacturer's ADB USB driver. No root is required by this approach.
 Selecting a map pin only changes the preview. **Set location** starts or updates a
 fixed location on the selected phone. Only one unresolved phone session is
 kept at a time. When an unknown, waiting, or error recovery record belongs to a
-different phone and Ghost discovers another usable USB phone, Ghost automatically
+different phone and Roam discovers another usable USB phone, Roam automatically
 discards the old record so the newly connected phone can be prepared or have a
 location set.
 Active, applying, reconnecting, and stopping sessions remain protected from this
 automatic cleanup.
 
 On iPhone, the sidecar reasserts the selected coordinates on a one-second loop.
-Each DVT location command is awaited before Ghost records its acknowledgement.
+Each DVT location command is awaited before Roam records its acknowledgement.
 Fresh acknowledgements also keep the selected USB connection ready during
 discovery polling, so a transient discovery miss does not gray out a healthy
 session. On Android, the on-phone helper emits timestamped mock fixes every two
@@ -101,12 +101,12 @@ Verify the result in the intended phone app.
 **Restore** stops the Android mock service or sends the iOS clear-location command.
 The iOS clear API does not return an independent real-GPS measurement; cached
 locations in other apps can take time to update. Normal quit attempts restoration
-by default. If that fails, Ghost offers to keep the app open or quit with an
+by default. If that fails, Roam offers to keep the app open or quit with an
 unresolved session saved for recovery.
 
-If the phone disconnects during a live session, Ghost waits and automatically reconnects
+If the phone disconnects during a live session, Roam waits and automatically reconnects
 the **same phone and applied target** when it becomes available again, while the
-same Ghost process remains open. Selecting another pin still changes only the
+same Roam process remains open. Selecting another pin still changes only the
 preview; use **Update location** to apply that target. You can also use **Retry
 location** or **Reconnect & set location** on the same phone after a connection
 failure. While the previous session is active, applying, reconnecting, or stopping,
@@ -119,13 +119,13 @@ phone is absent or cannot be verified, it may retain its last simulated location
 until it is restarted or restored separately.
 
 **Restore** cancels automatic reconnection, including while the cable is absent.
-If reconnection is already in progress, Ghost waits for that bounded operation
-before clearing the simulation. An unplugged phone must reconnect before Ghost
+If reconnection is already in progress, Roam waits for that bounded operation
+before clearing the simulation. An unplugged phone must reconnect before Roam
 can send the clear command.
 
 USB unplug, laptop sleep, force-quit, and a crashed helper cannot guarantee immediate
 restoration. Android's upstream helper can keep supplying its last coordinates
-without the cable. After Ghost restarts, continuing or clearing a saved session on
+without the cable. After Roam restarts, continuing or clearing a saved session on
 the same phone requires a manual **Retry location** or **Restore**; it is never
 automatically resumed on startup. A different usable phone instead triggers the
 unresolved-record cleanup described above.
@@ -139,7 +139,7 @@ Choose **Route**, select a start using search, coordinates, or a map pin, and cl
 stops, in order. **Plan road route** previews the driving route. **Start route**
 moves the selected phone to the first road point and begins playback.
 
-Ghost uses the open-source [OSRM](https://github.com/Project-OSRM/osrm-backend)
+Roam uses the open-source [OSRM](https://github.com/Project-OSRM/osrm-backend)
 routing service with OpenStreetMap roads. Pins snap to roads within 1 km; if no
 connected driving route exists, planning fails instead of drawing a straight line.
 The speed is fixed at **45 mph (20.1168 m/s)** along the full geometry, irrespective
@@ -155,7 +155,7 @@ you press Resume. Slow commands or scheduling stalls pause rather than building 
 backlog or jumping ahead. Timings depend on the operating system and connection latency;
 the app does not guarantee that every phone app consumes each fix.
 
-Route geometry and progress stay in memory. Restarting Ghost does not resume a
+Route geometry and progress stay in memory. Restarting Roam does not resume a
 route; it keeps the existing recovery record for Retry or Restore. Restore before
 editing an active route or changing phones.
 
@@ -174,7 +174,7 @@ availability guarantee. Change the HTTPS Photon API endpoint in Settings for a
 larger public deployment. See THIRD_PARTY_NOTICES.md.
 
 The OSRM demo service is for reasonable noncommercial use, capped at one request
-per second, with no uptime guarantee. Ghost requests it only on **Plan road route**.
+per second, with no uptime guarantee. Roam requests it only on **Plan road route**.
 See [OSRM's demo policy](https://github.com/Project-OSRM/osrm-backend/wiki/Demo-server).
 A larger public deployment needs its own routing service instead of relying on the demo.
 
@@ -195,8 +195,8 @@ device runtimes. Release installers are unsigned. Signing/notarization credentia
 for a trusted macOS launch and a recognized Windows publisher.
 No publishing or repository upload is performed by these commands.
 
-For v0.1.7, a macOS arm64 build produces `Ghost-0.1.7-mac-arm64.dmg` and
-`Ghost-0.1.7-mac-arm64.zip` in `release/`.
+For v0.1.7, a macOS arm64 build produces `Roam-0.1.7-mac-arm64.dmg` and
+`Roam-0.1.7-mac-arm64.zip` in `release/`.
 
 ### Native CI builds
 

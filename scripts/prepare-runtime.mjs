@@ -13,4 +13,4 @@ function execute(file, args) {
 }
 await execute(process.execPath, [path.join(root, 'scripts/prepare-android.mjs')]);
 await execute(process.execPath, [path.join(root, 'scripts/build-ios-sidecar.mjs')]);
-console.log('Ghost device runtimes are ready.');
+console.log('Roam device runtimes are ready.');

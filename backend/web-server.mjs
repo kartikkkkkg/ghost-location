@@ -67,7 +67,7 @@ async function readJson(request) {
 }
 
 /**
- * LAN web control for Ghost. Serves a phone-friendly control page and a small
+ * LAN web control for Roam. Serves a phone-friendly control page and a small
  * JSON API over the same Controller the desktop UI uses. Access requires the
  * PIN shown in the desktop app; the PIN is regenerated on every start and web
  * sessions expire after 12 hours. The server only makes sense on a trusted
@@ -196,7 +196,7 @@ export class WebControlServer {
     }
 
     if (!route.startsWith('/api/')) { sendJson(response, 404, { error: 'Not found.' }); return; }
-    if (!this.authenticated(request)) { sendJson(response, 401, { error: 'Enter the PIN from the Ghost app first.' }); return; }
+    if (!this.authenticated(request)) { sendJson(response, 401, { error: 'Enter the PIN from the Roam app first.' }); return; }
 
     try {
       if (request.method === 'GET' && route === '/api/state') {

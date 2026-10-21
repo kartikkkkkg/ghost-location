@@ -371,7 +371,7 @@ export class AndroidAdapter {
   }
 
   async reset(device) {
-    // Reset only Ghost's ownership bookkeeping. It deliberately sends no ADB
+    // Reset only Roam's ownership bookkeeping. It deliberately sends no ADB
     // command: recovery callers either replace the target immediately, or have
     // explicitly chosen to forget an unreachable phone's unresolved record.
     const serial = this.serialOf(device);

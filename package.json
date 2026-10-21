@@ -1,9 +1,9 @@
 {
   "name": "ghost-location",
-  "version": "0.1.7",
+  "version": "0.2.0",
   "private": true,
   "description": "Choose a place. Set your phone's location over USB or Wi-Fi.",
-  "author": "Ghost contributors",
+  "author": "Roam contributors",
   "license": "GPL-3.0-or-later",
   "type": "module",
   "main": "electron/main.mjs",
@@ -35,7 +35,7 @@
   },
   "build": {
     "appId": "org.ghostlocation.desktop",
-    "productName": "Ghost",
+    "productName": "Roam",
     "directories": {
       "output": "release"
     },
@@ -72,7 +72,7 @@
       "category": "public.app-category.developer-tools",
       "identity": null,
       "extendInfo": {
-        "NSLocalNetworkUsageDescription": "Ghost connects to your trusted phone on the same Wi-Fi network to simulate locations.",
+        "NSLocalNetworkUsageDescription": "Roam connects to your trusted phone on the same Wi-Fi network to simulate locations.",
         "NSBonjourServices": [
           "_apple-mobdev2._tcp",
           "_adb-tls-connect._tcp",
@@ -89,6 +89,6 @@
       "oneClick": false,
       "allowToChangeInstallationDirectory": true
     },
-    "artifactName": "Ghost-${version}-${os}-${arch}.${ext}"
+    "artifactName": "Roam-${version}-${os}-${arch}.${ext}"
   }
 }
