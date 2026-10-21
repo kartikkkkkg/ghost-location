@@ -9,6 +9,7 @@ import { IosAdapter } from '../backend/ios.mjs';
 import { AndroidAdapter } from '../backend/android.mjs';
 import { run } from '../backend/process.mjs';
 import { wifiStatus } from '../backend/network.mjs';
+import { WebControlServer } from '../backend/web-server.mjs';
 
 const rootPath = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const devUrl = !app.isPackaged && process.env.GHOST_DEV_URL === 'http://127.0.0.1:5173' ? process.env.GHOST_DEV_URL : null;
@@ -16,7 +17,7 @@ if (!app.isPackaged) app.setPath('userData', process.env.GHOST_TEST_DATA || path
 app.setName('Ghost');
 protocol.registerSchemesAsPrivileged([{ scheme: 'ghost', privileges: { standard: true, secure: true, supportFetchAPI: true, corsEnabled: true } }]);
 
-let window, controller, poll, wakeLock, quitting = false, quitPending = false;
+let window, controller, poll, wakeLock, quitting = false, quitPending = false, webControl = null;
 const geocoder = new Geocoder();
 const allowedExternal = new Set(['github.com', 'developer.android.com', 'developer.apple.com', 'support.apple.com', 'www.openstreetmap.org', 'openstreetmap.org', 'photon.komoot.io', 'doronz88.github.io']);
 if (!app.requestSingleInstanceLock()) app.quit();
@@ -54,8 +55,17 @@ async function boot() {
     if (window && !window.isDestroyed()) window.webContents.send('ghost:state', state);
   });
 
+  webControl = new WebControlServer({
+    controller,
+    search: query => { geocoder.configure(controller.state.preferences.geocoderUrl || 'https://photon.komoot.io/api/'); return geocoder.search(query); },
+    port: Number(process.env.GHOST_WEB_PORT) || 8420,
+  });
+  // Web control is an optional convenience: never block startup on it.
+  webControl.start().then(info => console.log(`Ghost web control: ${info.url} (PIN ${info.pin})`)).catch(error => console.error(`Ghost web control unavailable: ${error.message}`));
+
   const handlers = {
     getState: () => controller.snapshot(),
+    getWebControl: () => webControl.info(),
     switchToWifi: id => controller.switchToWifi(id),
     setConnection: value => controller.setConnection(value),
     connectWifi: value => controller.connectWifi(value),
@@ -146,6 +156,7 @@ async function finishQuit() {
   }
   if (controller.state.session) await controller.sessionEnded({ deviceId: controller.state.session.deviceId, retry: false, error: 'Ghost quit without confirming restoration. Reconnect this phone and choose Retry location or Restore.' });
   clearInterval(poll);
+  await webControl?.stop().catch(() => {});
   if (wakeLock != null) { powerSaveBlocker.stop(wakeLock); wakeLock = null; }
   await Promise.race([controller.dispose({ restore: false }), new Promise(resolve => setTimeout(resolve, 6000))]);
   quitting = true; app.quit();

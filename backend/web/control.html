@@ -1,0 +1,286 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<title>Ghost — Web control</title>
+<link rel="stylesheet" href="/vendor/leaflet.css" />
+<style>
+  :root { color-scheme: light; --ink: #1d1d1f; --muted: #6e6e73; --line: #e3e5e8; --accent: #111; --danger: #b3261e; --ok: #137333; }
+  * { box-sizing: border-box; }
+  body { margin: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; color: var(--ink); background: #f8f9fb; }
+  header { display: flex; align-items: center; gap: 8px; padding: 12px 16px; background: #fff; border-bottom: 1px solid var(--line); position: sticky; top: 0; z-index: 500; }
+  header .logo { font-weight: 700; font-size: 18px; }
+  header .status { margin-left: auto; font-size: 13px; color: var(--muted); text-align: right; }
+  header .status.active { color: var(--ok); font-weight: 600; }
+  main { padding: 12px 12px 32px; max-width: 640px; margin: 0 auto; }
+  h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); margin: 18px 2px 8px; }
+  #map { height: 46vh; min-height: 280px; border-radius: 14px; border: 1px solid var(--line); z-index: 1; }
+  .chips { display: flex; flex-wrap: wrap; gap: 8px; }
+  .chip { border: 1px solid var(--line); background: #fff; border-radius: 999px; padding: 9px 14px; font-size: 14px; cursor: pointer; }
+  .chip[aria-pressed="true"] { background: var(--accent); color: #fff; border-color: var(--accent); }
+  .chip small { display: block; font-size: 11px; opacity: .75; }
+  .search { position: relative; }
+  .search input { width: 100%; padding: 12px 14px; font-size: 16px; border: 1px solid var(--line); border-radius: 12px; background: #fff; }
+  .results { position: absolute; left: 0; right: 0; top: calc(100% + 4px); background: #fff; border: 1px solid var(--line); border-radius: 12px; overflow: hidden; z-index: 600; box-shadow: 0 8px 24px rgba(0,0,0,.12); }
+  .results button { display: block; width: 100%; text-align: left; padding: 11px 14px; font-size: 14px; background: none; border: none; border-bottom: 1px solid var(--line); cursor: pointer; }
+  .results button:last-child { border-bottom: none; }
+  .places { display: flex; flex-direction: column; gap: 6px; }
+  .places button { text-align: left; padding: 11px 14px; font-size: 15px; background: #fff; border: 1px solid var(--line); border-radius: 12px; cursor: pointer; }
+  .places button small { display: block; color: var(--muted); font-size: 12px; margin-top: 2px; }
+  .pending { background: #fff; border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; font-size: 15px; }
+  .pending small { display: block; color: var(--muted); margin-top: 2px; font-size: 12px; }
+  .actions { display: flex; flex-direction: column; gap: 8px; margin-top: 14px; }
+  button.primary { background: var(--accent); color: #fff; border: none; border-radius: 12px; padding: 15px; font-size: 16px; font-weight: 600; cursor: pointer; }
+  button.secondary { background: #fff; color: var(--ink); border: 1px solid var(--line); border-radius: 12px; padding: 13px; font-size: 15px; font-weight: 600; cursor: pointer; }
+  button.danger { background: #fff; color: var(--danger); border: 1px solid var(--line); border-radius: 12px; padding: 13px; font-size: 15px; font-weight: 600; cursor: pointer; }
+  button:disabled { opacity: .45; cursor: default; }
+  .row { display: flex; gap: 8px; } .row > * { flex: 1; }
+  .note { font-size: 13px; color: var(--muted); margin: 8px 2px 0; }
+  #toast { position: fixed; left: 12px; right: 12px; bottom: calc(12px + env(safe-area-inset-bottom)); background: #1d1d1f; color: #fff; padding: 12px 16px; border-radius: 12px; font-size: 14px; z-index: 900; box-shadow: 0 8px 24px rgba(0,0,0,.25); }
+  #toast.error { background: var(--danger); }
+  #login { max-width: 360px; margin: 10vh auto 0; padding: 0 20px; text-align: center; }
+  #login input { width: 100%; padding: 14px; font-size: 22px; text-align: center; letter-spacing: .4em; border: 1px solid var(--line); border-radius: 12px; background: #fff; margin: 14px 0; }
+  [hidden] { display: none !important; }
+</style>
+</head>
+<body>
+<div id="login" hidden>
+  <div style="font-size:34px">👻</div>
+  <h1 style="font-size:22px;margin:8px 0 4px">Ghost web control</h1>
+  <p class="note" style="text-align:center">Enter the 6-digit PIN shown in the Ghost app on your computer, under Settings → Web control.</p>
+  <form id="login-form">
+    <input id="pin" inputmode="numeric" autocomplete="one-time-code" pattern="[0-9]{6}" maxlength="6" placeholder="••••••" aria-label="PIN" />
+    <button class="primary" style="width:100%" type="submit">Connect</button>
+  </form>
+  <p id="login-error" class="note" style="color:var(--danger)"></p>
+</div>
+
+<div id="app" hidden>
+  <header>
+    <span class="logo">👻 Ghost</span>
+    <span id="session-status" class="status">Not connected</span>
+  </header>
+  <main>
+    <h2>Phone</h2>
+    <div id="devices" class="chips"></div>
+    <p id="no-devices" class="note" hidden>No phone is connected to Ghost yet. Connect one in the desktop app, then pull to refresh this page.</p>
+
+    <h2>Destination</h2>
+    <div class="search">
+      <input id="search" type="search" placeholder="Search for a place" autocomplete="off" aria-label="Search for a place" />
+      <div id="results" class="results" hidden></div>
+    </div>
+    <div id="map" style="margin-top:10px"></div>
+    <p class="note">Tap the map to drop a pin, or pick a saved place.</p>
+
+    <h2>Selected</h2>
+    <div id="pending" class="pending">No location selected yet.<small>Your phone stays where it is until you press Set location.</small></div>
+
+    <div class="actions">
+      <button id="apply" class="primary" disabled>Set location</button>
+      <div class="row">
+        <button id="route" class="secondary" disabled>Drive here</button>
+        <button id="route-toggle" class="secondary" hidden>Pause route</button>
+      </div>
+      <button id="restore" class="danger" hidden>Restore real location</button>
+    </div>
+    <p id="route-status" class="note"></p>
+
+    <h2>Saved places</h2>
+    <div id="saved" class="places"></div>
+    <h2>Recent</h2>
+    <div id="recent" class="places"></div>
+  </main>
+</div>
+<div id="toast" hidden></div>
+
+<script src="/vendor/leaflet.js"></script>
+<script>
+'use strict';
+const $ = (s) => document.querySelector(s);
+let appState = null;
+let selectedDeviceId = null;
+let pending = null;
+let pendingAction = false;
+let toastTimer = null;
+
+function toast(message, error = false) {
+  const el = $('#toast');
+  el.textContent = message;
+  el.className = error ? 'error' : '';
+  el.hidden = false;
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => { el.hidden = true; }, 4200);
+}
+
+async function api(route, options = {}) {
+  const response = await fetch(route, { credentials: 'same-origin', ...options });
+  const data = await response.json().catch(() => ({}));
+  if (response.status === 401 && route !== '/api/login') { showLogin(); throw new Error(data.error || 'Enter the PIN first.'); }
+  if (!response.ok) throw new Error(data.error || 'Something went wrong.');
+  return data;
+}
+const post = (route, body) => api(route, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body || {}) });
+
+function showLogin() { $('#app').hidden = true; $('#login').hidden = false; }
+function showApp() { $('#login').hidden = true; $('#app').hidden = false; }
+
+$('#login-form').addEventListener('submit', async (event) => {
+  event.preventDefault();
+  $('#login-error').textContent = '';
+  try {
+    await post('/api/login', { pin: $('#pin').value.trim() });
+    showApp();
+    initMap();
+    await refresh();
+  } catch (error) { $('#login-error').textContent = error.message; }
+});
+
+// ---------- map ----------
+let map, pendingMarker, liveMarker;
+function initMap() {
+  if (map) return;
+  L.Icon.Default.imagePath = '/vendor/images/';
+  map = L.map('map', { minZoom: 2, maxZoom: 19, worldCopyJump: true }).setView([20, 0], 2);
+  L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19, attribution: '© OpenStreetMap contributors' }).addTo(map);
+  map.on('click', (event) => {
+    const point = event.latlng.wrap();
+    selectPending({ latitude: point.lat, longitude: point.lng, label: 'Dropped pin' }, false);
+  });
+}
+function selectPending(place, fly = true) {
+  pending = { latitude: place.latitude, longitude: place.longitude, label: place.label || 'Selected place' };
+  if (map) {
+    if (!pendingMarker) pendingMarker = L.marker([pending.latitude, pending.longitude]).addTo(map);
+    else pendingMarker.setLatLng([pending.latitude, pending.longitude]);
+    if (fly) map.flyTo([pending.latitude, pending.longitude], Math.max(map.getZoom(), 14));
+  }
+  render();
+}
+
+// ---------- rendering ----------
+function deviceLabel(device) {
+  const state = { ready: 'Ready', 'setup-required': 'Setup needed', unauthorized: 'Trust computer', offline: 'Disconnected' }[device.state] || device.state;
+  return `${device.name}<small>${device.platform === 'ios' ? 'iPhone' : 'Android'} · ${device.connection === 'wifi' ? 'Wi-Fi' : 'USB'} · ${state}</small>`;
+}
+function render() {
+  if (!appState) return;
+  const { devices, session, route } = appState;
+  if (!selectedDeviceId || !devices.some(d => d.id === selectedDeviceId)) {
+    selectedDeviceId = (session && devices.find(d => d.id === session.deviceId)?.id) || devices.find(d => d.state === 'ready')?.id || devices[0]?.id || null;
+  }
+  const device = devices.find(d => d.id === selectedDeviceId);
+  $('#devices').innerHTML = devices.map(d => `<button class="chip" data-device="${d.id}" aria-pressed="${d.id === selectedDeviceId}">${deviceLabel(d)}</button>`).join('');
+  for (const chip of document.querySelectorAll('[data-device]')) chip.addEventListener('click', () => { selectedDeviceId = chip.dataset.device; render(); });
+  $('#no-devices').hidden = devices.length > 0;
+
+  const status = $('#session-status');
+  if (session) {
+    status.textContent = `${session.deviceName} · ${session.status === 'active' ? 'Location set' : session.status}`;
+    status.classList.toggle('active', session.status === 'active');
+    if (map) {
+      if (!liveMarker) liveMarker = L.circleMarker([session.latitude, session.longitude], { radius: 9, color: '#137333', fillColor: '#34a853', fillOpacity: .9 }).addTo(map);
+      else liveMarker.setLatLng([session.latitude, session.longitude]);
+    }
+  } else {
+    status.textContent = 'No location set';
+    status.classList.remove('active');
+    if (liveMarker) { liveMarker.remove(); liveMarker = null; }
+  }
+
+  const busy = pendingAction || appState.busy || ['applying', 'stopping', 'reconnecting'].includes(session?.status);
+  $('#pending').innerHTML = pending
+    ? `${escapeHtml(pending.label)}<small>${pending.latitude.toFixed(5)}, ${pending.longitude.toFixed(5)}</small>`
+    : 'No location selected yet.<small>Your phone stays where it is until you press Set location.</small>';
+  const canApply = Boolean(device && pending && !busy && (device.state === 'ready' || session?.deviceId === device.id));
+  $('#apply').disabled = !canApply;
+  $('#apply').textContent = session?.status === 'active' && session.deviceId === selectedDeviceId ? 'Update location' : 'Set location';
+  $('#route').disabled = !(pending && session?.status === 'active' && session.deviceId === selectedDeviceId && !busy);
+  const toggle = $('#route-toggle');
+  toggle.hidden = !(route && ['running', 'paused'].includes(route.status));
+  toggle.textContent = route?.status === 'running' ? 'Pause route' : 'Resume route';
+  $('#route-status').textContent = route ? route.message || '' : '';
+  $('#restore').hidden = !session;
+
+  const placeButton = (place) => `<button data-place='${JSON.stringify({ latitude: place.latitude, longitude: place.longitude, label: place.label }).replace(/'/g, '&#39;')}'>${escapeHtml(place.label)}<small>${place.latitude.toFixed(4)}, ${place.longitude.toFixed(4)}</small></button>`;
+  $('#saved').innerHTML = appState.savedPlaces.length ? appState.savedPlaces.map(placeButton).join('') : '<p class="note">No saved places yet. Save one in the desktop app.</p>';
+  $('#recent').innerHTML = appState.recentPlaces.length ? appState.recentPlaces.map(placeButton).join('') : '<p class="note">Nothing yet.</p>';
+  for (const button of document.querySelectorAll('[data-place]')) button.addEventListener('click', () => selectPending(JSON.parse(button.dataset.place)));
+}
+function escapeHtml(value) { return String(value ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c])); }
+
+async function refresh() {
+  try { appState = await api('/api/state'); render(); }
+  catch (error) { if (!$('#app').hidden) toast(error.message, true); }
+}
+setInterval(() => { if (!$('#app').hidden && !pendingAction) refresh(); }, 2000);
+
+// ---------- actions ----------
+async function run(operation, successMessage) {
+  pendingAction = true; render();
+  try {
+    appState = await operation();
+    render();
+    if (successMessage) toast(successMessage);
+  } catch (error) { toast(error.message, true); await refresh(); }
+  finally { pendingAction = false; render(); }
+}
+$('#apply').addEventListener('click', () => run(
+  () => post('/api/apply', { deviceId: selectedDeviceId, ...pending }),
+  'Location sent to your phone.'
+));
+$('#restore').addEventListener('click', () => run(
+  () => post('/api/restore'),
+  'Real location restored.'
+));
+$('#route').addEventListener('click', async () => {
+  const session = appState.session;
+  if (!session || !pending) return;
+  pendingAction = true; render();
+  try {
+    const { route } = await post('/api/route/plan', { waypoints: [
+      { latitude: session.latitude, longitude: session.longitude, label: session.label || 'Current location' },
+      pending,
+    ] });
+    appState = await post('/api/route/start', { deviceId: selectedDeviceId, routeId: route.id });
+    render();
+    toast('Route started.');
+  } catch (error) { toast(error.message, true); await refresh(); }
+  finally { pendingAction = false; render(); }
+});
+$('#route-toggle').addEventListener('click', () => run(
+  () => post(appState.route?.status === 'running' ? '/api/route/pause' : '/api/route/resume')
+));
+
+// ---------- search ----------
+let searchTimer = null;
+$('#search').addEventListener('input', () => {
+  clearTimeout(searchTimer);
+  const query = $('#search').value.trim();
+  if (query.length < 3) { $('#results').hidden = true; return; }
+  searchTimer = setTimeout(async () => {
+    try {
+      const { results } = await api(`/api/search?q=${encodeURIComponent(query)}`);
+      const box = $('#results');
+      box.innerHTML = results.map((r, i) => `<button data-result="${i}">${escapeHtml(r.label)}</button>`).join('');
+      box.hidden = results.length === 0;
+      for (const button of box.querySelectorAll('[data-result]')) button.addEventListener('click', () => {
+        const r = results[Number(button.dataset.result)];
+        selectPending({ latitude: r.latitude, longitude: r.longitude, label: r.label });
+        box.hidden = true;
+        $('#search').value = r.label;
+      });
+    } catch (error) { toast(error.message, true); }
+  }, 350);
+});
+document.addEventListener('click', (event) => { if (!event.target.closest('.search')) $('#results').hidden = true; });
+
+// ---------- boot ----------
+(async () => {
+  try { appState = await api('/api/state'); showApp(); initMap(); render(); }
+  catch { showLogin(); }
+})();
+</script>
+</body>
+</html>

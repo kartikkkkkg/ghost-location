@@ -27,6 +27,7 @@ export function createPreviewBridge() {
   const desktopOnly = async () => { throw new Error('Open Ghost on your desktop to connect and control a phone. This browser preview cannot change a device.'); };
   return {
     getState: async () => structuredClone(state),
+    getWebControl: async () => ({ running: false, url: null, pin: null, error: 'Web control runs in the desktop app.' }),
     scanDevices: async () => structuredClone(state),
     switchToWifi: desktopOnly,
     setConnection: desktopOnly,

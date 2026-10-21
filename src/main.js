@@ -197,6 +197,7 @@ $('#app').innerHTML = `
     <div class="sheet-heading"><div><span class="eyebrow">Ghost</span><h2 id="settings-title">Settings</h2></div><button class="icon-button" data-close="settings-dialog" aria-label="Close settings">${icon('x')}</button></div>
     <div class="settings-group"><h3>Device setup</h3><div class="configuration-row"><div><strong id="settings-configuration">No setup selected</strong><small>Ghost uses this to show the right connection steps.</small></div><button id="rerun-onboarding" class="secondary-button compact">Change</button></div></div>
     <div class="settings-group"><h3>Location sessions</h3><label class="setting-row"><span><strong>Restore on quit</strong><small>Ghost tries to stop location simulation before it closes. Keep the phone connected.</small></span><input id="restore-preference" type="checkbox" class="switch" /></label></div>
+    <div class="settings-group"><h3>Web control</h3><div id="web-control-status"><p class="settings-note">Checking…</p></div><p class="settings-note">Open the address on your phone while it is on the same Wi-Fi, enter the PIN, and you can set locations from the phone itself. If your computer asks, allow Ghost to accept incoming connections. Anyone on your network who has the PIN can control locations, so keep it private.</p></div>
     <div class="settings-group"><h3>Device tools</h3><div id="runtime-status"></div><button id="install-runtime" class="secondary-button">${icon('download')} Prepare device tools</button><p class="settings-note">First-time preparation may need an internet connection.</p></div>
     <form id="provider-form" class="settings-group"><h3>Place search</h3><label class="field-label" for="provider-url">Photon-compatible endpoint</label><input id="provider-url" class="text-input" type="url" required placeholder="https://photon.komoot.io/api/" /><p class="settings-note">Search runs only when you submit. Map tiles come from OpenStreetMap.</p><div class="button-row"><button type="submit" class="secondary-button compact">Save endpoint</button><button id="reset-provider" type="button" class="text-button">Reset</button></div></form><div class="settings-footer">Ghost 0.1.7 · Free and open source</div>
   </dialog>
@@ -441,6 +442,20 @@ function renderRuntime() {
   $('#settings-configuration').textContent = selectedGuide?.title || 'No setup selected';
 }
 
+let webControlInfo = null;
+async function refreshWebControl() {
+  try { webControlInfo = await api.getWebControl(); } catch { webControlInfo = null; }
+  renderWebControl();
+}
+function renderWebControl() {
+  const element = $('#web-control-status');
+  if (!element) return;
+  if (!webControlInfo) { element.innerHTML = '<p class="settings-note">Web control status is unavailable.</p>'; return; }
+  if (!webControlInfo.running) { element.innerHTML = `<p class="settings-note">Web control is not running${webControlInfo.error ? `: ${esc(webControlInfo.error)}` : ''}. Restart Ghost to try again.</p>`; return; }
+  element.innerHTML = `<div class="runtime-row"><div>${icon('smartphone')}<span><strong>${esc(webControlInfo.url)}</strong><small>PIN <strong style="letter-spacing:.25em">${esc(webControlInfo.pin)}</strong> · new PIN each time Ghost starts</small></span></div><span class="runtime-tag available">On</span></div>`;
+  paintIcons();
+}
+
 function renderSetup() {
   const guide = guideFor();
   $('#setup-title').textContent = guide.title;
@@ -565,7 +580,7 @@ $('#recenter-button').onclick = () => {
 $('#retry-map').onclick = () => { tileErrors = 0; $('#map-error').hidden = true; tiles.redraw(); };
 $('#connection-badge').onclick = openSetup;
 $('#help-button').onclick = openSetup;
-$('#settings-button').onclick = () => { $('#provider-url').value = state.preferences.geocoderUrl || 'https://photon.komoot.io/api/'; renderRuntime(); paintIcons(); $('#settings-dialog').showModal(); };
+$('#settings-button').onclick = () => { $('#provider-url').value = state.preferences.geocoderUrl || 'https://photon.komoot.io/api/'; renderRuntime(); refreshWebControl(); paintIcons(); $('#settings-dialog').showModal(); };
 $('#scan-button').onclick = () => runOperation(() => api.scanDevices(), 'Device list refreshed.');
 $('#setup-scan').onclick = async () => { const result = await runOperation(() => api.scanDevices()); if (result && !result.devices.some((device) => device.platform === setupPlatform && device.state !== 'offline')) $('#setup-detection').textContent = `No ${platformName(setupPlatform)} found. Check the data cable, unlock the phone, and accept its prompt.`; };
 $('#change-configuration').onclick = openOnboarding;
@@ -666,6 +681,7 @@ const resizeObserver = new ResizeObserver(() => map.invalidateSize());
 resizeObserver.observe($('.map-workspace'));
 api.onState(acceptState);
 render();
+refreshWebControl();
 api.getState().then(async next => {
   acceptState(next);
   if (api.getRoute) {
