@@ -2,6 +2,29 @@
 
 Roam runs on your computer and sends simulated locations to a phone over a USB data cable or the same Wi-Fi network. It is free and open source. No Roam account, API key, subscription, jailbreak, or root is needed.
 
+## Run the current version from source (recommended)
+
+The packaged 0.1.7 download below is the previous release. The current code — the Wi-Fi fixes, route modes with realistic pacing, saved routes and history, GPX import/export, and phone-browser web control — runs from source:
+
+**You need:** Git, Node.js 20 or newer, and (iPhone only) Python 3. Mac: Apple silicon or Intel. Windows: 64-bit.
+
+```sh
+git clone https://github.com/kartikkkkkg/ghost-location.git
+cd ghost-location
+git checkout fix/wifi-apply-button   # the branch carrying the current work
+npm install
+npm run runtime:ios       # iPhone only: builds the iOS runtime (one-time, a few minutes)
+npm run runtime:android   # Android only: downloads the official ADB tools (one-time)
+npm start
+```
+
+- `npm start` builds the interface and opens the app. Leave that terminal open; closing it quits the app.
+- Instead of the two `runtime:` commands, you can open the app and click **Prepare device tools** in **Settings** — it does the same preparation.
+- **Updating later:** quit the app, then `git pull`, `npm install`, and `npm start` again. Re-run `npm run runtime:ios` if an update changes the `sidecar/` folder.
+- Then follow **Choose your configuration** and the checklist for your computer + phone below — they apply exactly the same to the source build.
+
+The rest of this guide (phone preparation, Wi-Fi connection, troubleshooting) applies to both the source build and the packaged release unless a section says otherwise.
+
 ## Download and open
 
 Download **Roam 0.1.7** from [GitHub Releases](https://github.com/Blueturboguy07/ghost-location/releases/tag/v0.1.7) or use the [Publik installation guide](https://publikhq.com/ghost/install).
@@ -77,14 +100,34 @@ Roam displays command acknowledgements on iPhone and helper readbacks on Android
 
 ## Follow a road route
 
-1. Select **Route**. Search or drop a pin for the start, then click **Add selected pin to route**.
-2. Add a destination the same way. You can add up to 12 stops, in travel order.
-3. Click **Plan road route**. Inspect the road line and distance before starting. Pins may snap to nearby roads; disconnected roads fail planning.
-4. Click **Start route · 45 mph**. The phone moves to the first road point, then follows the route at **45 mph**. Roam sends a new target every **one second**.
-5. **Pause route** holds the current point; **Resume route · 45 mph** continues. Arrival holds the destination. Check motion in the phone's map as well as Roam's blue dot.
-6. Click **Restore real location** when finished. Allow the phone's map a moment to refresh before unplugging.
+1. Select **Route**. Build the stop list in travel order: search for a place or drop a pin, then click **Add selected pin to route** — up to 12 stops. If a location session is already active, **Add current position** starts the route where the phone already is, so there is no jump. Remove a stop with its **×**.
+2. Choose how it travels: **Walk** (3 mph), **Cycle** (12 mph) or **Drive** (45 mph), or type any custom speed from 0.5 to 250 mph.
+3. **Realistic pacing** (on by default) makes the movement human: the phone accelerates gently, eases off for bends, slows into junctions, and briefly stops at sharp turns (longer at junctions when driving). Turn it off for a perfectly constant speed.
+4. **Loop route** (off by default): on arrival the phone turns around and drives back along the same roads, back and forth — it never teleports back to the start. A route whose end is within about 30 m of its start simply laps.
+5. Click **Plan road route** and check the road line, distance and time. Pins may snap to nearby roads; disconnected roads fail planning. Change the mode or speed and re-plan only if you want a different road profile — **Start route** also accepts new speed/pacing/loop choices on an existing plan.
+6. Click **Start route**. Roam sends a new target about every second. **Pause** holds the current point; **Resume** continues. Arrival holds the destination until you restore.
+7. If the connection drops mid-route, movement holds at the last point and **resumes on its own** when the same phone reconnects — no need to touch anything. If the computer sleeps, wake it and the same recovery happens.
+8. **Slow connections no longer pause routes.** Points go out as fast as the phone accepts them while the position stays true to elapsed time. You may see a note that the connection is slow; the route keeps its pace.
+9. Click **Restore real location** when finished. Allow the phone's map a moment to refresh before unplugging.
 
-The speed is constant, regardless of road limits or traffic. The blue dot represents the last sent point. Keep Roam running, the cable connected, and the computer awake. Minimizing Roam does not stop playback. Unplugging, sleep, or slow updates pause movement; reconnect the same phone and press **Resume**. Restarting Roam does not recover route geometry.
+More route tools, under the route panel:
+
+- **Save route** — name the planned route; saved routes appear in a list with **Start** (one click), **Load** (review first) and **Delete**. Up to 50.
+- **Drive back** — reverses the current plan, so the phone returns along the same roads to where the route began.
+- **Export GPX / Import GPX** — download the planned route as a `.gpx` track, or load any track file (from a fitness app, a friend, a route planner) as a ready-to-drive route.
+- **Recent routes** — completed and partially driven routes are remembered (up to 20) with a **Replay** button.
+
+Keep Roam running and the computer awake during a route. Minimizing Roam does not stop playback.
+
+## Control from your phone's browser (web control)
+
+Once Roam is running on your computer, you can drive it from the phone itself — no cable, nothing to install on the phone:
+
+1. In the desktop app, open **Settings → Web control**. It shows a URL (like `http://192.168.1.20:8420`) and a **6-digit PIN**. The PIN is regenerated every time the app starts.
+2. Put the phone on the **same Wi-Fi network** as the computer, open the URL in the phone's browser, and enter the PIN.
+3. The web page is the full control surface: search or tap the map to set a location, build a route stop-by-stop with **Add pin to route** (or **Drive here** for a quick one-stop route), choose mode/speed/pacing/loop, start saved routes and places, pause/resume, and **Restore real location**.
+
+Notes: web control works only on your local network — the address is not reachable from the internet. Anyone on the network still needs the PIN, and wrong guesses are rate-limited. Keep the desktop app running; the phone page talks to it.
 
 ## If something goes wrong
 
@@ -107,7 +150,7 @@ Mac → iPhone has been used successfully on a physical phone. Windows → iPhon
 
 For help, [open an issue](https://github.com/Blueturboguy07/ghost-location/issues) with the Roam version, computer OS/processor, phone OS, and exact error. Remove phone identifiers and private locations from logs and screenshots.
 
-## Connect over the same Wi-Fi network (0.1.7)
+## Connect over the same Wi-Fi network
 
 After a phone is working over USB, Roam offers **Switch to Wi-Fi** if your computer has an active Wi-Fi connection. Choose **Stay on USB** to dismiss the offer for that phone. You can always open **Connection: USB · Change** below the Phone card and click **Switch to Wi-Fi**.
 
@@ -140,6 +183,6 @@ If the connection drops, check Wireless debugging and reconnect with its current
 
 Allow Roam and its bundled device tools through local-network/firewall prompts. Guest networks, client isolation and VPNs can block local discovery. Use the same ordinary Wi-Fi network for both devices. To remove trust later, forget the computer in Android's Wireless debugging settings, or disable Wi-Fi visibility in Finder/Apple Devices for iPhone.
 
-Routes still request updates every second at 45 mph; slow or lost connections pause the route instead of jumping ahead. Fixed iPhone locations keep the one-second acknowledged refresh loop; Android's helper refreshes a fixed location every two seconds. Restore before disconnecting. Wi-Fi loss, sleep or a closed app cannot guarantee immediate restoration; reconnect the phone and use Restore, or restart it.
+Routes request updates every second at the speed you chose. A slow Wi-Fi connection no longer pauses a route: points go out as fast as the phone accepts them and the position stays true to elapsed time. A lost connection holds movement, and the route **resumes automatically** when the same phone reconnects. Fixed iPhone locations keep the one-second acknowledged refresh loop; Android's helper refreshes a fixed location every two seconds. Restore before disconnecting. Wi-Fi loss, sleep or a closed app cannot guarantee immediate restoration; reconnect the phone and use Restore, or restart it.
 
-Wi-Fi has automated adapter, transport-selection, pairing, identity, refresh and UI coverage. It has **not yet been verified end to end on physical phones on either host OS**. The working Mac → iPhone USB result does not establish Wi-Fi compatibility on a specific phone/network.
+Mac → iPhone over Wi-Fi was **verified end to end on a physical phone on 2026-10-21**, including the fix for phones whose Wi-Fi address rotates (iOS private Wi-Fi address): Roam matches the phone by its identity, not its current network address. Other host/phone combinations have automated adapter, transport-selection, pairing, identity, refresh and UI coverage but have not all been run on physical hardware.

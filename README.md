@@ -5,8 +5,12 @@ place, drop a pin, or enter coordinates, then explicitly apply it to your select
 phone. Windows and macOS share one interface and use the appropriate iPhone or
 Android adapter.
 
-Current version: **0.1.7**. See [CHANGELOG.md](CHANGELOG.md) for the onboarding,
-interface, Android cleanup, Windows packaging, recovery-record, and reconnection changes.
+**New here? Start with the [setup guide](SETUP.md)** — how to run the current
+version from source, prepare your phone, set locations, drive routes, and
+control Roam from your phone's browser.
+
+Current development version: **0.2.0** (this branch). The last packaged release
+is **0.1.7**; see [CHANGELOG.md](CHANGELOG.md) for what has changed since.
 
 ![Roam following an example road route in Chicago](docs/images/ghost-route.png)
 
