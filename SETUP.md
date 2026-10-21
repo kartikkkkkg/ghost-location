@@ -9,7 +9,7 @@ The packaged 0.1.7 download below is the previous release. The current code — 
 **You need:** Git, Node.js 20 or newer, and (iPhone only) Python 3. Mac: Apple silicon or Intel. Windows: 64-bit.
 
 ```sh
-git clone https://github.com/kartikkkkkg/ghost-location.git
+git clone https://github.com/kartikkkkkg/roam.git
 cd ghost-location
 git checkout fix/wifi-apply-button   # the branch carrying the current work
 npm install
@@ -148,7 +148,7 @@ Roam has no account or telemetry. Device identifiers, saved places, and a recove
 
 Mac → iPhone has been used successfully on a physical phone. Windows → iPhone, Windows → Android, and Mac → Android have software/adapter coverage; they have **not all been verified with physical USB phones**. Native installer builds are separate from end-to-end phone compatibility. See [validation](docs/validation.md) and the [hardware test matrix](docs/hardware-test-matrix.md).
 
-For help, [open an issue](https://github.com/Blueturboguy07/ghost-location/issues) with the Roam version, computer OS/processor, phone OS, and exact error. Remove phone identifiers and private locations from logs and screenshots.
+For help, [open an issue](https://github.com/kartikkkkkg/roam/issues) with the Roam version, computer OS/processor, phone OS, and exact error. Remove phone identifiers and private locations from logs and screenshots.
 
 ## Connect over the same Wi-Fi network
 

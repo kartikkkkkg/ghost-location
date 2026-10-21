@@ -12,9 +12,9 @@ control Roam from your phone's browser.
 Current development version: **0.2.0** (this branch). The last packaged release
 is **0.1.7**; see [CHANGELOG.md](CHANGELOG.md) for what has changed since.
 
-![Roam following an example road route in Chicago](docs/images/ghost-route.png)
+![Roam driving a route with the current interface — travel modes, custom speed, realistic pacing, loop, and GPX tools](docs/images/roam-route.png)
 
-*Route mode in the actual interface, using an example phone and sample Chicago route.*
+*Route mode in the current interface: a live drive with the route panel's mode, speed, pacing and loop controls, saved routes and history. Captured from the app's own UI test run with a fixture phone; map tiles are replaced by the plain fallback background in that environment.*
 
 ## Download and install
 
