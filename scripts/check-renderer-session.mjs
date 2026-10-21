@@ -126,6 +126,31 @@ try {
   assert.match(await page.locator('#session-refresh').textContent(), /Last command acknowledged.*Updates acknowledged/);
   assert.match(await page.locator('#session-refresh').textContent(), /phone-app location is not verified/);
 
+  // A location set from elsewhere (the web control) must move the desktop pin.
+  const webTarget = { latitude: 28.6139, longitude: 77.209, label: 'Set from phone' };
+  await page.evaluate(async point => {
+    const current = await window.ghost.getState();
+    await window.ghostFixture.setState({ session: { ...current.session, ...point, status: 'active' } });
+  }, webTarget);
+  await page.waitForFunction(([latitude, longitude]) =>
+    document.querySelector('#latitude').value === latitude && document.querySelector('#longitude').value === longitude,
+    [webTarget.latitude.toFixed(6), webTarget.longitude.toFixed(6)]);
+  assert.match(await page.locator('#destination-summary').textContent(), /Set from phone/);
+  console.log('PASS: a location set from the web control moves the desktop pin and destination.');
+
+  // But an external change must not clobber a pin the user is drafting here.
+  const draft = { latitude: 51.5074, longitude: -0.1278 };
+  await page.locator('#latitude').fill(String(draft.latitude));
+  await page.locator('#longitude').fill(String(draft.longitude));
+  await page.getByRole('button', { name: 'Select these coordinates', exact: true }).click();
+  await page.evaluate(async () => {
+    const current = await window.ghost.getState();
+    await window.ghostFixture.setState({ session: { ...current.session, latitude: 48.8566, longitude: 2.3522, label: 'Second phone change', status: 'active' } });
+  });
+  assert.equal(await page.locator('#latitude').inputValue(), draft.latitude.toFixed(6), 'An external change clobbered the desktop draft pin.');
+  assert.equal(await page.locator('#longitude').inputValue(), draft.longitude.toFixed(6), 'An external change clobbered the desktop draft pin.');
+  console.log('PASS: an external change leaves a desktop draft pin untouched.');
+
   await page.locator('[data-location-mode="route"]').click();
   for (const [latitude, longitude] of [[41.8827, -87.6233], [41.89, -87.63]]) {
     await page.locator('#latitude').fill(String(latitude));

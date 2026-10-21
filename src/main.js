@@ -236,7 +236,7 @@ function acceptState(next) {
   setupHost = state.preferences.hostPlatform || setupHost || detectedHost;
   setupPlatform = state.preferences.phonePlatform || state.devices.find((device) => device.id === selectedDeviceId)?.platform || setupPlatform;
   render();
-  if (!selectedPlace && state.session && Number.isFinite(state.session.latitude) && Number.isFinite(state.session.longitude)) selectPlace(state.session);
+  syncSelectedPlaceWithSession();
   if (state.warning && state.warning !== lastWarning) { lastWarning = state.warning; notify(state.warning, true); }
   if (!onboardingShown && state.preferences.onboardingComplete !== true) {
     onboardingShown = true;
@@ -263,6 +263,25 @@ async function runOperation(action, message, operation = null) {
     pendingAction = null;
     render();
   }
+}
+
+let lastSessionPoint = null;
+const samePoint = (a, b) => Boolean(a && b) && Math.abs(a.latitude - b.latitude) < 1e-9 && Math.abs(a.longitude - b.longitude) < 1e-9;
+
+// The desktop pin mirrors the live session, so a location set from the web
+// control appears here too. A pin the user is editing on the desktop no
+// longer matches the last known session point, and is never overwritten;
+// route playback has its own moving dot and is left alone. lastSessionPoint
+// survives a restore on purpose: a leftover mirror pin still follows the
+// next session, while a fresh draft pin does not.
+function syncSelectedPlaceWithSession() {
+  const session = state.session;
+  if (!session || !Number.isFinite(session.latitude) || !Number.isFinite(session.longitude)) return;
+  const point = { latitude: session.latitude, longitude: session.longitude, label: session.label || 'Dropped pin' };
+  const routeMoving = state.route && ['starting', 'running', 'paused'].includes(state.route.status);
+  if (!selectedPlace) selectPlace(point);
+  else if (!routeMoving && lastSessionPoint && !samePoint(point, lastSessionPoint) && samePoint(selectedPlace, lastSessionPoint)) selectPlace(point);
+  lastSessionPoint = point;
 }
 
 function selectPlace(place, fly = true) {
