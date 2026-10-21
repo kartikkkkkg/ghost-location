@@ -1,7 +1,7 @@
 import { EventEmitter } from 'node:events';
 import { randomUUID } from 'node:crypto';
 import { place, text, geocoderUrl } from './validation.mjs';
-import { Router, measurePath, pointAlong, mphToMps, buildPaceProfile, paceFactorAt, routeMode, routeSpeedMph } from './routing.mjs';
+import { Router, measurePath, pointAlong, distanceBetween, mphToMps, buildPaceProfile, paceFactorAt, routeMode, routeSpeedMph } from './routing.mjs';
 
 const REPLACEABLE_SESSION_STATUSES = new Set(['unknown', 'waiting', 'error']);
 const USABLE_REPLACEMENT_STATES = new Set(['ready', 'setup-required']);
@@ -294,7 +294,7 @@ export class Controller extends EventEmitter {
       catch (error) { this.state.session = previous; throw error; }
       const previousRoute = this.state.route;
       if (previousRoute && previousRoute.status !== 'completed' && (previousRoute.traveledMeters || 0) > 0) await this.recordRouteHistory(previousRoute, false);
-      this.state.route = route ? { id: route.id, deviceId: device.id, status: 'starting', mode: route.mode || 'drive', speedMph: route.speedMph ?? 45, pacing: route.pacing !== false, loop: Boolean(route.loop), loops: 0, imported: Boolean(route.imported), waypoints: route.waypoints || [], startedAt: new Date(this.now()).toISOString(), distanceMeters: route.distanceMeters, traveledMeters: 0, remainingSeconds: route.durationSeconds, point, message: 'Sending the route start to your phone…' } : null;
+      this.state.route = route ? { id: route.id, deviceId: device.id, status: 'starting', mode: route.mode || 'drive', speedMph: route.speedMph ?? 45, pacing: route.pacing !== false, loop: Boolean(route.loop), loops: 0, direction: 1, circuit: Boolean(route.loop) && Array.isArray(route.coordinates) && route.coordinates.length > 1 && distanceBetween(route.coordinates[0], route.coordinates.at(-1)) <= 30, imported: Boolean(route.imported), waypoints: route.waypoints || [], startedAt: new Date(this.now()).toISOString(), distanceMeters: route.distanceMeters, traveledMeters: 0, remainingSeconds: route.durationSeconds, point, message: 'Sending the route start to your phone…' } : null;
       this.notify();
       this.resumeSessionId = wasLive ? current.id : null;
       this.retryAt = 0; this.retryAttempts = 0;
@@ -615,9 +615,13 @@ export class Controller extends EventEmitter {
     this.routeTimer.unref?.();
   }
   advanceRoute(route, elapsedMs) {
+    // Returns the new POSITION along the path. Looping routes travel
+    // ping-pong (direction -1 on the way back), so this can decrease;
+    // the caller clamps and handles turnarounds.
     const cruise = mphToMps(route.speedMph ?? 45);
     const from = route.traveledMeters;
-    if (!route.pacing || !this.paceProfile) return Math.min(route.distanceMeters, from + cruise * elapsedMs / 1000);
+    const direction = route.direction || 1;
+    if (!route.pacing || !this.paceProfile) return from + direction * cruise * elapsedMs / 1000;
     if (route.dwellMs > 0) {
       route.dwellMs = Math.max(0, route.dwellMs - elapsedMs);
       route.speedNow = 0;
@@ -631,10 +635,10 @@ export class Controller extends EventEmitter {
     const maxDelta = accel * dt;
     speed += Math.abs(delta) <= maxDelta ? delta : Math.sign(delta) * maxDelta;
     route.speedNow = speed;
-    let to = from + speed * dt;
-    const stop = this.paceProfile.stops.find(s => s.at > from + 0.01 && s.at <= to);
+    let to = from + direction * speed * dt;
+    const stop = this.paceProfile.stops.find(s => direction > 0 ? (s.at > from + 0.01 && s.at <= to) : (s.at < from - 0.01 && s.at >= to));
     if (stop) { to = stop.at; route.dwellMs = stop.dwellSeconds * 1000; route.speedNow = 0; }
-    return Math.min(route.distanceMeters, to);
+    return to;
   }
   async tickRoute() {
     const route = this.state.route, current = this.state.session;
@@ -656,24 +660,41 @@ export class Controller extends EventEmitter {
       try {
         const device = this.device(current.deviceId);
         let distance = this.advanceRoute(route, advanceMs);
-        if (route.loop && distance >= route.distanceMeters) {
-          route.loops = (route.loops || 0) + 1;
-          route.traveledMeters = 0; route.speedNow = 0; route.dwellMs = 0;
-          distance = 0;
-          route.message = `Looping · lap ${route.loops + 1}. ${this.routeMessage(route)}`;
+        if (route.loop) {
+          // Looping must never teleport: an open route drives back along
+          // the same roads (ping-pong). Only a true circuit — end within
+          // 30 m of the start — wraps, and that step is walking distance.
+          if (route.circuit) {
+            if (distance >= route.distanceMeters) {
+              route.loops = (route.loops || 0) + 1;
+              route.speedNow = 0; route.dwellMs = 0;
+              distance = 0;
+              route.message = `Looping · lap ${route.loops + 1}. ${this.routeMessage(route)}`;
+            }
+          } else if (distance >= route.distanceMeters && (route.direction || 1) > 0) {
+            distance = route.distanceMeters;
+            route.direction = -1; route.speedNow = 0; route.dwellMs = 0;
+            route.message = `Reached the end — driving back. ${this.routeMessage(route)}`;
+          } else if (distance <= 0 && (route.direction || 1) < 0) {
+            distance = 0;
+            route.direction = 1; route.loops = (route.loops || 0) + 1; route.speedNow = 0; route.dwellMs = 0;
+            route.message = `Looping · lap ${route.loops + 1}. ${this.routeMessage(route)}`;
+          }
         }
+        distance = Math.min(route.distanceMeters, Math.max(0, distance));
         const point = pointAlong(this.routePath, distance);
         // Record the attempted point before sending. Recovery holds this point;
         // it never advances the route while transport state is uncertain.
         Object.assign(current, point);
-        Object.assign(route, { point, traveledMeters: distance, remainingSeconds: (route.distanceMeters - distance) / mphToMps(route.speedMph ?? 45) });
+        const remainingMeters = route.loop && !route.circuit && (route.direction || 1) < 0 ? distance : route.distanceMeters - distance;
+        Object.assign(route, { point, traveledMeters: distance, remainingSeconds: remainingMeters / mphToMps(route.speedMph ?? 45) });
         const adapter = this.adapters[device.platform];
         const result = await (adapter.update ? adapter.update(device, { ...point, sessionId: current.id }) : adapter.set(device, { ...point, sessionId: current.id }));
         if (this.state.session !== current || current.status !== 'active' || this.closing) return;
         current.lastRefreshAt = result?.refreshedAt || new Date(this.now()).toISOString();
         current.refreshCount = (current.refreshCount || 0) + 1;
         current.refreshIntervalMs = 1000; current.refreshSource = 'command-ack';
-        if (distance >= route.distanceMeters) {
+        if (!route.loop && distance >= route.distanceMeters) {
           route.status = 'completed'; route.message = 'Arrived. Your phone holds the destination until you restore real location.';
           await this.recordRouteHistory(route, true);
         } else {

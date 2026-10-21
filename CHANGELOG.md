@@ -13,6 +13,10 @@
   Wi-Fi. Points are sent at the rate the phone accepts while the position
   stays true to elapsed time, and a scheduling stall resyncs with travel
   capped per tick instead of pausing the route.
+- Loop routes no longer teleport back to the start each lap (games that
+  watch movement flagged the impossible jump and reported no location).
+  Open routes now drive back along the same roads; only true circuits
+  (end within 30 m of the start) wrap, which reads as a short walk.
 
 ## 0.1.7
 

@@ -156,7 +156,7 @@ $('#app').innerHTML = `
               <div class="route-mode-group" role="group" aria-label="Travel mode"><button data-route-mode="walk" aria-pressed="false">Walk</button><button data-route-mode="cycle" aria-pressed="false">Cycle</button><button data-route-mode="drive" aria-pressed="true">Drive</button></div>
               <label class="route-speed"><span>Speed</span><span class="route-speed-input"><input id="route-speed" type="number" min="0.5" max="250" step="any" value="45" aria-label="Route speed in miles per hour" /> mph</span></label>
               <label class="route-toggle"><input id="route-pacing" type="checkbox" checked /> Realistic pacing <span>slows for turns, pauses at junctions</span></label>
-              <label class="route-toggle"><input id="route-loop" type="checkbox" /> Loop route <span>repeat from the start on arrival</span></label>
+              <label class="route-toggle"><input id="route-loop" type="checkbox" /> Loop route <span>drive back and forth — never teleports</span></label>
             </div>
             <div class="route-plan-actions"><button id="plan-route" class="secondary-button">Plan road route</button><button id="clear-route" class="text-button">Clear</button></div>
             <p class="route-provider">Stops are sent to OSRM when you plan. Roads by OpenStreetMap. Internet required.</p>

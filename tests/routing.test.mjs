@@ -204,14 +204,28 @@ test('custom speed drives the tick rate', async t => {
   close(f.c.state.route.traveledMeters, mphToMps(90));
   assert.equal(f.c.state.route.speedMph, 90);
 });
-test('looping routes wrap to the start and keep running', async t => {
+test('looping routes ping-pong back along the route and never teleport', async t => {
   const f = await fixture(t);
   await f.c.planRoute({waypoints: plan.waypoints, pacing: false, loop: true});
   await f.start();
+  const sent = [];
+  const original = f.adapter.update;
+  f.adapter.update = async (device, point) => { sent.push([point.longitude, point.latitude]); return original(device, point); };
   for (let i = 0; i < 12; i++) { f.advance(1000); await f.c.tickRoute(); }
   assert.equal(f.c.state.route.status, 'running');
-  assert.equal(f.c.state.route.loops, 1);
-  assert.ok(f.c.state.route.traveledMeters < ROUTE_SPEED_MPS * 2);
+  close(f.c.state.route.traveledMeters, path.distanceMeters, 0.01); // at the far end
+  assert.equal(f.c.state.route.direction, -1, 'Route turns around instead of jumping back');
+  assert.equal(f.c.state.route.loops, 0);
+  for (let i = 0; i < 12; i++) { f.advance(1000); await f.c.tickRoute(); }
+  assert.equal(f.c.state.route.status, 'running');
+  assert.equal(f.c.state.route.loops, 1, 'A lap completes back at the start');
+  assert.equal(f.c.state.route.direction, 1);
+  close(f.c.state.route.traveledMeters, 0, 0.01);
+  // Continuity: no two consecutive points are further apart than one
+  // second of travel — apps watching movement see no impossible jumps.
+  for (let i = 1; i < sent.length; i++) {
+    assert.ok(distanceBetween(sent[i - 1], sent[i]) <= ROUTE_SPEED_MPS + 0.01, `Jump of ${distanceBetween(sent[i - 1], sent[i])}m at step ${i}`);
+  }
 });
 test('saved routes persist, start in one call, and history records and replays runs', async t => {
   const f = await fixture(t);
