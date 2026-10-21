@@ -13,6 +13,10 @@
   Wi-Fi. Points are sent at the rate the phone accepts while the position
   stays true to elapsed time, and a scheduling stall resyncs with travel
   capped per tick instead of pausing the route.
+- Switch to Wi-Fi no longer gives up after a single 2-second
+  discovery pass: it polls for the phone for ~35 s while it starts
+  advertising, fixing intermittent "not reachable on Wi-Fi yet"
+  failures right after Wi-Fi is enabled.
 - Loop routes no longer teleport back to the start each lap (games that
   watch movement flagged the impossible jump and reported no location).
   Open routes now drive back along the same roads; only true circuits

@@ -390,16 +390,36 @@ test('Wi-Fi mode is explicit in discovery, set and restore requests', async () =
 
 test('Wi-Fi handoff preflight bypasses the USB cache and requires the same ready phone', async () => {
   for (const matching of [true, false]) {
-    const h = harness(); h.adapter.connection = 'usb';
+    const h = harness(undefined, undefined, {wifiAttempts: 3, wifiRetryDelayMs: 1}); h.adapter.connection = 'usb';
     const preflight = h.adapter.prepareWifi({...device, state: 'ready'});
     const outcome = matching ? preflight : assert.rejects(preflight, /Wi-Fi/);
     await new Promise(setImmediate);
     assert.equal(h.requests[0].method, 'enable-wifi'); assert.equal(h.requests[0].params.connection || 'usb', 'usb');
-    h.reply(h.requests[0], {enabled: true}); await new Promise(setImmediate);
-    assert.equal(h.requests[1].method, 'discover'); assert.equal(h.requests[1].params.connection, 'wifi');
+    h.reply(h.requests[0], {enabled: true});
     const wireless = {...device, id: matching ? device.id : 'ios:other', connection: 'wifi', state: 'ready'};
-    h.reply(h.requests[1], [wireless]);
+    for (let i = 1; i <= 3; i++) {
+      for (let spin = 0; spin < 50 && !h.requests[i]; spin++) await new Promise(r => setTimeout(r, 1));
+      assert.equal(h.requests[i].method, 'discover'); assert.equal(h.requests[i].params.connection, 'wifi');
+      h.reply(h.requests[i], [wireless]);
+      if (matching) break;
+    }
     if (matching) assert.deepEqual(await outcome, wireless); else await outcome;
     assert.equal(h.adapter.connection, 'usb'); h.child.kill();
   }
+});
+
+test('Wi-Fi preflight keeps looking until the phone starts advertising', async () => {
+  const h = harness(undefined, undefined, {wifiAttempts: 5, wifiRetryDelayMs: 1});
+  h.adapter.connection = 'usb';
+  const preflight = h.adapter.prepareWifi({...device, state: 'ready'});
+  await new Promise(setImmediate);
+  h.reply(h.requests[0], {enabled: true});
+  const wireless = {...device, connection: 'wifi', state: 'ready'};
+  for (let i = 1; i <= 3; i++) {
+    for (let spin = 0; spin < 50 && !h.requests[i]; spin++) await new Promise(r => setTimeout(r, 1));
+    h.reply(h.requests[i], i < 3 ? [] : [wireless]); // absent for two passes, then it advertises
+  }
+  assert.deepEqual(await preflight, wireless);
+  assert.equal(h.requests.filter(r => r.method === 'discover').length, 3);
+  h.child.kill();
 });

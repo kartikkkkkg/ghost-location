@@ -5,13 +5,16 @@ import { createInterface } from 'node:readline';
 
 /** Persistent, private stdio bridge. No shell, network listener, or implicit device selection. */
 export class IosAdapter {
-  constructor({ rootPath, resourcesPath, runner, onSessionEnd = () => {}, onLocationRefresh = () => {}, now = () => Date.now() } = {}) {
+  constructor({ rootPath, resourcesPath, runner, onSessionEnd = () => {}, onLocationRefresh = () => {}, now = () => Date.now(), sleep = ms => new Promise(resolve => setTimeout(resolve, ms)), wifiAttempts = 8, wifiRetryDelayMs = 2500 } = {}) {
     this.rootPath = rootPath ?? process.cwd();
     this.resourcesPath = resourcesPath ?? path.join(this.rootPath, 'resources');
     this.runner = runner ?? spawn;
     this.onSessionEnd = onSessionEnd;
     this.onLocationRefresh = onLocationRefresh;
     this.now = now;
+    this.sleep = sleep;
+    this.wifiAttempts = wifiAttempts;
+    this.wifiRetryDelayMs = wifiRetryDelayMs;
     this.child = null;
     this.pending = new Map();
     this.sequence = 0;
@@ -182,10 +185,17 @@ export class IosAdapter {
   }
   async prepareWifi(device) {
     await this.enableWifi(device);
-    const devices = await this.request('discover', {connection: 'wifi'}, 15000);
-    const wireless = devices.find(item => item.id === device.id && item.connection === 'wifi' && item.state === 'ready');
-    if (!wireless) throw new Error('Your iPhone is not reachable on Wi-Fi yet. Keep it unlocked on the same network, then try again.');
-    return wireless;
+    // The phone needs a few seconds to start advertising after Wi-Fi is
+    // enabled, and the bridge browses for only ~2 s per pass — a single
+    // pass is a coin flip that made Switch to Wi-Fi fail intermittently.
+    // Poll until the same phone answers as ready or the budget runs out.
+    for (let attempt = 0; attempt < this.wifiAttempts; attempt++) {
+      const devices = await this.request('discover', {connection: 'wifi'}, 15000);
+      const wireless = devices.find(item => item.id === device.id && item.connection === 'wifi' && item.state === 'ready');
+      if (wireless) return wireless;
+      if (attempt + 1 < this.wifiAttempts) await this.sleep(this.wifiRetryDelayMs);
+    }
+    throw new Error('Your iPhone is not reachable on Wi-Fi yet. Keep it unlocked on the same network, then try again.');
   }
   async enableWifi(device) {
     if (device.connection !== 'usb') throw new Error('Connect this iPhone by USB to enable Wi-Fi.');
