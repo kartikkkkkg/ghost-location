@@ -26,6 +26,8 @@ function fakeController() {
     },
     stopLocation: async () => { calls.push(['stopLocation']); state.session = null; return structuredClone(state); },
     planRoute: async (waypoints) => { calls.push(['planRoute', waypoints]); return { id: 'route-1', distanceMeters: 100, durationSeconds: 60, waypoints }; },
+    getRoute: () => ({ id: 'route-1', coordinates: [[2, 1], [4, 3]] }),
+    startSavedRoute: async (id, deviceId) => { calls.push(['startSavedRoute', id, deviceId]); state.route = { status: 'running' }; return structuredClone(state); },
     startRoute: async (input) => { calls.push(['startRoute', input]); state.route = { status: 'running' }; return structuredClone(state); },
     pauseRoute: async () => { calls.push(['pauseRoute']); return structuredClone(state); },
     resumeRoute: async () => { calls.push(['resumeRoute']); return structuredClone(state); },
@@ -107,6 +109,18 @@ test('route plan, start, pause and resume are exposed', async (t) => {
   await fetch(`${base}/api/route/pause`, { method: 'POST', headers: { cookie } });
   await fetch(`${base}/api/route/resume`, { method: 'POST', headers: { cookie } });
   assert.deepEqual(controller.calls.map(([name]) => name), ['planRoute', 'startRoute', 'pauseRoute', 'resumeRoute']);
+});
+
+test('saved routes start and the planned route geometry are exposed', async (t) => {
+  const { base, controller } = await startServer(t);
+  const { cookie } = await login(base);
+  const started = await (await fetch(`${base}/api/route/saved`, {
+    method: 'POST', headers: { cookie, 'content-type': 'application/json' }, body: JSON.stringify({ id: 'saved-1', deviceId: 'ios:phone' }),
+  })).json();
+  assert.equal(started.route.status, 'running');
+  assert.deepEqual(controller.calls.map(([name]) => name), ['startSavedRoute']);
+  const planned = await (await fetch(`${base}/api/route`, { headers: { cookie } })).json();
+  assert.deepEqual(planned.route.coordinates, [[2, 1], [4, 3]]);
 });
 
 test('search delegates to the configured geocoder', async (t) => {

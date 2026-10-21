@@ -206,6 +206,8 @@ export class WebControlServer {
         const token = this.sessionToken(request);
         if (token) this.sessions.delete(token);
         sendJson(response, 200, { ok: true });
+      } else if (request.method === 'GET' && route === '/api/route') {
+        sendJson(response, 200, { route: this.controller.getRoute ? this.controller.getRoute() : null });
       } else if (request.method === 'POST' && route === '/api/scan') {
         sendJson(response, 200, publicState(await this.controller.scanDevices()));
       } else if (request.method === 'GET' && route === '/api/search') {
