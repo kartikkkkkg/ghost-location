@@ -551,10 +551,17 @@ export class Controller extends EventEmitter {
     this.state.routeHistory = [entry, ...this.state.routeHistory].slice(0, 20);
     await this.persist();
   }
-  async startRoute({ deviceId, routeId } = {}) {
+  async startRoute({ deviceId, routeId, speedMph, pacing, loop } = {}) {
     const route = this.plannedRoute;
     if (!route || route.id !== routeId) throw new Error('Plan the route before starting.');
     if (this.state.route && this.state.session) throw new Error('Restore real location before starting another route.');
+    // Speed/pacing/loop can be adjusted on the start button without
+    // replanning the geometry.
+    if (speedMph != null) route.speedMph = routeSpeedMph(route.mode || 'drive', speedMph);
+    if (pacing != null) route.pacing = Boolean(pacing);
+    if (loop != null) route.loop = Boolean(loop);
+    route.durationSeconds = route.distanceMeters / mphToMps(route.speedMph ?? 45);
+    this.paceProfile = route.pacing ? (this.paceProfile || buildPaceProfile(this.routePath, route.mode || 'drive')) : null;
     await this.applyLocation({ deviceId, ...pointAlong(this.routePath, 0), label: `Route to ${route.waypoints.at(-1).label}` }, route);
     if (this.closing || this.suspended || this.state.session?.status !== 'active' || this.state.route?.status !== 'starting') return this.snapshot();
     this.state.route.status = 'running';

@@ -15,6 +15,8 @@ let state = {
   }],
   runtime: { ios: { available: true }, android: { available: true } },
   savedPlaces: [],
+  savedRoutes: [],
+  routeHistory: [],
   recentPlaces: [],
   preferences: { restoreOnQuit: true, onboardingComplete: true, hostPlatform: 'mac', phonePlatform: 'ios' },
   busy: false,
@@ -50,9 +52,11 @@ contextBridge.exposeInMainWorld('ghost', {
   switchToWifi: async deviceId => { calls.push({method: 'switchToWifi', deviceId}); state.preferences.connection = 'wifi'; state.devices = state.devices.map(d => ({...d, connection: 'wifi'})); if (state.session) state.session.connection = 'wifi'; return publish(); },
   connectWifi: async value => { calls.push({method: 'connectWifi', ...value}); return publish(); },
   getRoute: async () => plannedRoute || null,
-  planRoute: async stops => {
+  getWebControl: async () => ({ running: true, url: 'http://192.0.2.10:8420', pin: '123456', error: null }),
+  planRoute: async input => {
+    const stops = Array.isArray(input) ? input : input.waypoints;
     calls.push({method: 'planRoute', stops});
-    plannedRoute = {id: 'test-route', waypoints: stops, coordinates: [[-87.6233, 41.8827], [-87.6233, 41.89], [-87.63, 41.89]], distanceMeters: 1400, durationSeconds: 69.59, speedMph: 45};
+    plannedRoute = {id: 'test-route', waypoints: stops, coordinates: [[-87.6233, 41.8827], [-87.6233, 41.89], [-87.63, 41.89]], distanceMeters: 1400, durationSeconds: 69.59, speedMph: input?.speedMph ?? 45, mode: input?.mode ?? 'drive', pacing: input?.pacing !== false, loop: Boolean(input?.loop)};
     return plannedRoute;
   },
   startRoute: async value => {
@@ -79,6 +83,11 @@ contextBridge.exposeInMainWorld('ghost', {
     };
     return publish();
   },
+  saveRoute: unexpected('saveRoute'),
+  deleteRoute: unexpected('deleteRoute'),
+  startSavedRoute: unexpected('startSavedRoute'),
+  replayRoute: unexpected('replayRoute'),
+  importRoute: unexpected('importRoute'),
   scanDevices: unexpected('scanDevices'),
   prepareDevice: unexpected('prepareDevice'),
   stopLocation: unexpected('stopLocation'),

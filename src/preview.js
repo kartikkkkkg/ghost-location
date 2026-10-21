@@ -11,6 +11,8 @@ export function createPreviewBridge() {
     },
     session: null,
     savedPlaces: read('ghost.preview.places', []),
+    savedRoutes: [],
+    routeHistory: [],
     recentPlaces: [],
     preferences: {
       restoreOnQuit: true,
@@ -40,6 +42,11 @@ export function createPreviewBridge() {
     startRoute: desktopOnly,
     pauseRoute: desktopOnly,
     resumeRoute: desktopOnly,
+    saveRoute: desktopOnly,
+    deleteRoute: desktopOnly,
+    startSavedRoute: desktopOnly,
+    replayRoute: desktopOnly,
+    importRoute: desktopOnly,
     installRuntime: desktopOnly,
     searchPlaces: async () => { throw new Error('Place search is available in the desktop app. In this preview, click the map or enter coordinates to choose a place.'); },
     savePlace: async (place) => {

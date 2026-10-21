@@ -403,6 +403,23 @@ dialog[open] { animation: rise .18s ease-out; }
 .route-stops small { display: block; margin-top: 3px; color: var(--secondary); font-size: 12px; }
 .route-stop-number { display: grid; place-items: center; width: 24px; height: 24px; flex: 0 0 auto; background: var(--fill); border-radius: 50%; font-size: 12px; }
 .route-plan-actions { display: flex; align-items: center; justify-content: space-between; gap: 15px; }
+.route-options { display: flex; flex-direction: column; gap: 10px; margin: 14px 0 4px; }
+.route-mode-group { display: flex; background: var(--fill); border-radius: 11px; padding: 3px; gap: 3px; }
+.route-mode-group button { flex: 1; border: 0; background: none; padding: 8px 4px; border-radius: 8px; font: inherit; font-size: 13px; font-weight: 550; color: var(--secondary); cursor: pointer; }
+.route-mode-group button[aria-pressed="true"] { background: white; color: var(--ink); box-shadow: 0 1px 4px #0002; }
+.route-speed { display: flex; align-items: center; justify-content: space-between; font-size: 13px; font-weight: 550; }
+.route-speed-input { display: flex; align-items: center; gap: 6px; color: var(--secondary); font-weight: 450; }
+.route-speed-input input { width: 72px; padding: 7px 9px; border: 1px solid var(--line-strong); border-radius: 9px; font: inherit; background: white; }
+.route-toggle { display: flex; gap: 8px; align-items: baseline; font-size: 13px; font-weight: 550; cursor: pointer; }
+.route-toggle input { accent-color: var(--ink); }
+.route-toggle span { display: block; color: var(--secondary); font-size: 12px; font-weight: 400; }
+.route-extra-actions { display: flex; flex-wrap: wrap; gap: 7px; margin-top: 10px; }
+.route-list-heading { font-size: 12px; text-transform: uppercase; letter-spacing: .07em; color: var(--secondary); margin: 20px 0 8px; }
+.route-list-item { display: flex; align-items: center; gap: 9px; width: 100%; text-align: left; padding: 10px 11px; border: 1px solid var(--line); border-radius: 12px; background: rgba(255,255,255,.55); margin-bottom: 7px; font: inherit; }
+.route-list-item > div { flex: 1; min-width: 0; }
+.route-list-item strong { display: block; font-size: 13px; font-weight: 550; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.route-list-item small { display: block; color: var(--secondary); font-size: 12px; margin-top: 2px; }
+.route-list-empty { color: var(--secondary); font-size: 12.5px; margin: 0 0 6px; }
 .route-provider { color: var(--secondary); font-size: 12px; line-height: 1.5; margin: 12px 0; }
 .route-summary { margin: 17px 0; padding: 14px; border: 1px solid var(--line); border-radius: 14px; background: rgba(255,255,255,.5); }
 .route-summary > div { display: flex; flex-direction: column; gap: 5px; }

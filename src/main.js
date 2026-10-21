@@ -8,6 +8,7 @@ import {
   ChevronLeft,
 } from 'lucide';
 import { createPreviewBridge } from './preview.js';
+import { buildGpx, parseGpx } from './gpx.js';
 
 const isPreview = !window.ghost;
 const detectedHost = /Windows/i.test(navigator.userAgent) ? 'windows' : 'mac';
@@ -82,6 +83,18 @@ let selectedPlace = null;
 let currentView = 'map';
 let locationMode = 'fixed';
 let routeStops = [], routePlan = null;
+let routeMode = 'drive', speedEdited = false;
+const ROUTE_MODE_INFO = { walk: { label: 'Walk', verb: 'Walking', defaultSpeed: 3 }, cycle: { label: 'Cycle', verb: 'Cycling', defaultSpeed: 12 }, drive: { label: 'Drive', verb: 'Driving', defaultSpeed: 45 } };
+const routeSpeedValue = () => { const value = Number(document.querySelector('#route-speed')?.value); return Number.isFinite(value) && value >= 0.5 && value <= 250 ? value : ROUTE_MODE_INFO[routeMode].defaultSpeed; };
+const routeOptions = () => ({ mode: routeMode, speedMph: routeSpeedValue(), pacing: document.querySelector('#route-pacing')?.checked !== false, loop: Boolean(document.querySelector('#route-loop')?.checked) });
+function syncRouteControls(plan) {
+  if (!plan) return;
+  routeMode = plan.mode || 'drive';
+  const speed = document.querySelector('#route-speed'); if (speed) speed.value = plan.speedMph ?? ROUTE_MODE_INFO[routeMode].defaultSpeed;
+  speedEdited = true;
+  const pacing = document.querySelector('#route-pacing'); if (pacing) pacing.checked = plan.pacing !== false;
+  const loop = document.querySelector('#route-loop'); if (loop) loop.checked = Boolean(plan.loop);
+}
 let routeLine = null, routeDot = null;
 const routeMarkers = [];
 let setupHost = detectedHost;
@@ -139,11 +152,28 @@ $('#app').innerHTML = `
           <div id="route-controls" hidden>
             <button id="add-route-stop" class="secondary-button">${icon('plus')} Add selected pin to route</button>
             <ol id="route-stops" class="route-stops"></ol>
+            <div class="route-options">
+              <div class="route-mode-group" role="group" aria-label="Travel mode"><button data-route-mode="walk" aria-pressed="false">Walk</button><button data-route-mode="cycle" aria-pressed="false">Cycle</button><button data-route-mode="drive" aria-pressed="true">Drive</button></div>
+              <label class="route-speed"><span>Speed</span><span class="route-speed-input"><input id="route-speed" type="number" min="0.5" max="250" step="any" value="45" aria-label="Route speed in miles per hour" /> mph</span></label>
+              <label class="route-toggle"><input id="route-pacing" type="checkbox" checked /> Realistic pacing <span>slows for turns, pauses at junctions</span></label>
+              <label class="route-toggle"><input id="route-loop" type="checkbox" /> Loop route <span>repeat from the start on arrival</span></label>
+            </div>
             <div class="route-plan-actions"><button id="plan-route" class="secondary-button">Plan road route</button><button id="clear-route" class="text-button">Clear</button></div>
             <p class="route-provider">Stops are sent to OSRM when you plan. Roads by OpenStreetMap. Internet required.</p>
             <div id="route-summary" class="route-summary" hidden></div>
             <button id="route-play" class="primary-button" disabled>Start route · 45 mph</button>
+            <div class="route-extra-actions">
+              <button id="route-save" class="secondary-button compact" disabled>Save route</button>
+              <button id="route-return" class="secondary-button compact" disabled>Drive back</button>
+              <button id="route-export" class="secondary-button compact" disabled>Export GPX</button>
+              <button id="route-import" class="secondary-button compact">Import GPX</button>
+              <input id="route-import-file" type="file" accept=".gpx,application/gpx+xml" hidden />
+            </div>
             <p id="route-hint" class="action-hint">Add a start and destination, in order.</p>
+            <h3 class="route-list-heading">Saved routes</h3>
+            <div id="saved-routes"></div>
+            <h3 class="route-list-heading">Recent routes</h3>
+            <div id="route-history"></div>
           </div>
           <div id="fixed-actions"><button id="apply-button" class="primary-button" disabled><span>Set location</span>${icon('arrow-up-right')}</button><p id="apply-hint" class="action-hint">Connect a phone to get started.</p></div><button id="restore-button" class="restore-button" disabled>${icon('rotate-ccw')} Restore real location</button>
         </section>
@@ -203,6 +233,8 @@ $('#app').innerHTML = `
   </dialog>
 
   <dialog id="save-dialog" class="small-dialog" aria-labelledby="save-title"><div class="sheet-heading"><div><span class="eyebrow">Saved place</span><h2 id="save-title">Save this place</h2></div><button class="icon-button" data-close="save-dialog" aria-label="Close save place">${icon('x')}</button></div><form id="save-form"><label class="field-label" for="place-name">Name</label><input id="place-name" class="text-input" maxlength="120" required placeholder="Place name" /><input id="place-id" type="hidden" /><p id="save-coordinates" class="settings-note"></p><button class="primary-button" type="submit"><span>Save place</span>${icon('bookmark')}</button></form></dialog>
+
+  <dialog id="route-save-dialog" class="small-dialog" aria-labelledby="route-save-title"><div class="sheet-heading"><div><span class="eyebrow">Saved route</span><h2 id="route-save-title">Save this route</h2></div><button class="icon-button" data-close="route-save-dialog" aria-label="Close save route">${icon('x')}</button></div><form id="route-save-form"><label class="field-label" for="route-name">Name</label><input id="route-name" class="text-input" maxlength="80" required placeholder="Home → Office" /><p id="route-save-summary" class="settings-note"></p><button class="primary-button" type="submit"><span>Save route</span>${icon('bookmark')}</button></form></dialog>
   <div id="toast" class="toast" role="status" hidden><span id="toast-icon"></span><span id="toast-message"></span><button id="toast-close" class="icon-button" aria-label="Dismiss notification">${icon('x')}</button></div>
 `;
 
@@ -400,13 +432,25 @@ function renderRoute() {
   document.querySelectorAll('[data-remove-stop]').forEach(button => { button.onclick = () => {
     routeStops.splice(Number(button.dataset.removeStop), 1); routePlan = null; drawRoute(); renderRoute(); paintIcons();
   }; });
+  document.querySelectorAll('[data-route-mode]').forEach(button => {
+    button.setAttribute('aria-pressed', String(button.dataset.routeMode === routeMode));
+    button.disabled = active || busy;
+  });
+  $('#route-speed').disabled = active || busy;
+  $('#route-pacing').disabled = active || busy;
+  $('#route-loop').disabled = active || busy;
+  $('#route-save').disabled = busy || active || (routeStops.length < 2 && !routePlan);
+  $('#route-return').disabled = busy || active || (routeStops.length < 2 && !routePlan);
+  $('#route-export').disabled = busy || !routePlan;
+  $('#route-import').disabled = busy || active;
   $('#route-summary').hidden = !routePlan;
-  if (routePlan) setContent('#route-summary', `<div><strong>${(routePlan.distanceMeters / 1609.344).toFixed(2)} miles</strong><span>45 mph · 1 sec updates</span></div><progress aria-label="Route progress" max="${routePlan.distanceMeters}" value="${route?.traveledMeters || 0}"></progress><p>${route?.status === 'completed' ? 'Arrived at destination' : `${routeTime(route?.remainingSeconds ?? routePlan.durationSeconds)} ${active ? 'remaining' : 'at 45 mph'}`}</p>`);
+  if (routePlan) setContent('#route-summary', `<div><strong>${(routePlan.distanceMeters / 1609.344).toFixed(2)} miles</strong><span>${routePlan.imported ? 'Imported track · ' : ''}${ROUTE_MODE_INFO[routePlan.mode || 'drive'].label} · ${routePlan.speedMph ?? 45} mph · 1 sec updates</span></div><progress aria-label="Route progress" max="${routePlan.distanceMeters}" value="${route?.traveledMeters || 0}"></progress><p>${route?.status === 'completed' ? 'Arrived at destination' : `${routeTime(route?.remainingSeconds ?? routePlan.durationSeconds)} ${active ? 'remaining' : `at ${routePlan.speedMph ?? 45} mph`}`}</p>`);
   const device = state.devices.find(d => d.id === selectedDeviceId);
   const otherSession = state.session && state.session.deviceId !== selectedDeviceId;
   const running = route?.status === 'running', paused = route?.status === 'paused';
   $('#route-play').disabled = busy || (active ? !running && (!paused || !device || otherSession || !['ready', 'setup-required'].includes(device.state)) : !routePlan || device?.state !== 'ready' || Boolean(otherSession));
-  $('#route-play').textContent = busy ? 'Working…' : running ? 'Pause route' : paused ? 'Resume route · 45 mph' : route?.status === 'completed' ? 'Route completed' : 'Start route · 45 mph';
+  $('#route-play').textContent = busy ? 'Working…' : running ? 'Pause route' : paused ? `Resume route · ${route?.speedMph ?? 45} mph` : route?.status === 'completed' ? 'Route completed' : `Start route · ${routePlan?.speedMph ?? routeSpeedValue()} mph`;
+  renderRouteLists(active || busy);
   $('#route-hint').textContent = active ? route.message : otherSession ? 'Restore the current session before switching phones.' : !routePlan ? 'Add a start and destination, then plan the route.' : !device ? 'Connect a phone to start. The route is ready.' : 'Start moves your phone to the first stop, then follows the road.';
   if (route?.point && inRoute) {
     const point = [route.point.latitude, route.point.longitude];
@@ -414,6 +458,27 @@ function renderRoute() {
     else routeDot.setLatLng(point);
     routeDot.bringToFront();
   } else if (routeDot) { routeDot.remove(); routeDot = null; }
+}
+
+function renderRouteLists(locked) {
+  const saved = state.savedRoutes || [];
+  setContent('#saved-routes', saved.length ? saved.map(r => `<div class="route-list-item"><div><strong>${esc(r.name)}</strong><small>${ROUTE_MODE_INFO[r.mode]?.label || 'Drive'} · ${r.speedMph} mph · ${r.coordinates ? 'Imported track' : `${r.waypoints.length} stops`}${r.loop ? ' · Loop' : ''}</small></div><button class="secondary-button compact" data-route-start="${r.id}" ${locked ? 'disabled' : ''}>Start</button><button class="icon-button" data-route-load="${r.id}" aria-label="Load route ${esc(r.name)}" ${locked ? 'disabled' : ''}>${icon('download')}</button><button class="icon-button" data-route-delete="${r.id}" aria-label="Delete route ${esc(r.name)}" ${locked ? 'disabled' : ''}>${icon('x')}</button></div>`).join('') : '<p class="route-list-empty">Routes you save will appear here.</p>');
+  document.querySelectorAll('[data-route-start]').forEach(button => { button.onclick = () => runOperation(() => api.startSavedRoute({ id: button.dataset.routeStart, deviceId: selectedDeviceId }), 'Route started.'); });
+  document.querySelectorAll('[data-route-load]').forEach(button => { button.onclick = async () => {
+    const savedRoute = (state.savedRoutes || []).find(r => r.id === button.dataset.routeLoad);
+    if (!savedRoute) return;
+    const planned = await runOperation(() => savedRoute.coordinates
+      ? api.importRoute({ coordinates: savedRoute.coordinates, label: savedRoute.name, mode: savedRoute.mode, speedMph: savedRoute.speedMph, pacing: savedRoute.pacing, loop: savedRoute.loop })
+      : api.planRoute({ waypoints: savedRoute.waypoints, mode: savedRoute.mode, speedMph: savedRoute.speedMph, pacing: savedRoute.pacing, loop: savedRoute.loop }));
+    if (planned) { routePlan = planned; routeStops = planned.waypoints.map(stop => ({ ...stop })); syncRouteControls(planned); drawRoute(); renderRoute(); paintIcons(); }
+  }; });
+  document.querySelectorAll('[data-route-delete]').forEach(button => { button.onclick = () => runOperation(() => api.deleteRoute(button.dataset.routeDelete), 'Route removed.'); });
+  const history = state.routeHistory || [];
+  setContent('#route-history', history.length ? history.slice(0, 6).map(h => `<div class="route-list-item"><div><strong>${esc(h.label)}</strong><small>${(h.distanceMeters / 1609.344).toFixed(2)} mi · ${ROUTE_MODE_INFO[h.mode]?.label || 'Drive'} · ${h.completed ? 'Completed' : 'Partial'} · ${new Date(h.endedAt).toLocaleDateString([], { month: 'short', day: 'numeric' })}</small></div><button class="secondary-button compact" data-route-replay="${h.id}" ${locked ? 'disabled' : ''}>Replay</button></div>`).join('') : '<p class="route-list-empty">Routes you run will appear here.</p>');
+  document.querySelectorAll('[data-route-replay]').forEach(button => { button.onclick = async () => {
+    const planned = await runOperation(() => api.replayRoute(button.dataset.routeReplay));
+    if (planned) { routePlan = planned; routeStops = planned.waypoints.map(stop => ({ ...stop })); syncRouteControls(planned); drawRoute(); renderRoute(); paintIcons(); notify('Route loaded from history. Press Start route when ready.'); }
+  }; });
 }
 
 function renderSaved() {
@@ -446,7 +511,7 @@ function renderSession() {
   const recovering = ['waiting', 'unknown', 'error'].includes(session?.status);
   const recoveryText = recovering ? `<span class="session-recovery">${session.autoReconnect ? 'Roam will retry this phone automatically. Restore cancels retry.' : 'Reconnect this phone, then retry or restore.'}</span>` : '';
   const statusIcon = session?.status === 'reconnecting' ? 'refresh-cw' : session ? ['unknown', 'error', 'waiting'].includes(session.status) ? 'help-circle' : 'map-pin' : 'circle';
-  setContent('#session-status', `<span class="session-status-icon">${icon(statusIcon, session?.status === 'reconnecting' ? 'spin' : '')}</span><div><strong>${session ? session.status === 'active' && state.route ? ({ running: 'Following route · 45 mph', paused: 'Route paused', completed: 'Arrived', starting: 'Starting route…' }[state.route.status]) : labels[session.status] || 'Session needs attention' : 'Ready'}</strong><span>${esc(state.route?.message || session?.message || (session ? session.label || 'Keep your phone connected.' : state.devices.some((device) => device.state === 'ready') ? 'Choose a place to begin.' : 'Connect a phone and choose a place.'))}</span>${recoveryText}${refreshText}</div>${session?.status === 'active' ? '<span class="live-tag"><span></span>Active</span>' : ''}`);
+  setContent('#session-status', `<span class="session-status-icon">${icon(statusIcon, session?.status === 'reconnecting' ? 'spin' : '')}</span><div><strong>${session ? session.status === 'active' && state.route ? ({ running: `${ROUTE_MODE_INFO[state.route.mode]?.verb || 'Driving'} · ${state.route.speedMph ?? 45} mph${state.route.loop ? ` · Lap ${1 + (state.route.loops || 0)}` : ''}`, paused: 'Route paused', completed: 'Arrived', starting: 'Starting route…' }[state.route.status]) : labels[session.status] || 'Session needs attention' : 'Ready'}</strong><span>${esc(state.route?.message || session?.message || (session ? session.label || 'Keep your phone connected.' : state.devices.some((device) => device.state === 'ready') ? 'Choose a place to begin.' : 'Connect a phone and choose a place.'))}</span>${recoveryText}${refreshText}</div>${session?.status === 'active' ? '<span class="live-tag"><span></span>Active</span>' : ''}`);
 }
 
 function renderRuntime() {
@@ -516,7 +581,7 @@ function renderView() {
   $('#saved-nav-button').setAttribute('aria-pressed', String(showingSaved));
   $('#panel-eyebrow').textContent = showingSaved ? 'Library' : 'Location';
   $('#panel-title').textContent = showingSaved ? 'Saved places' : locationMode === 'route' ? 'Follow a route' : 'Set a location';
-  $('#panel-subtitle').textContent = showingSaved ? 'Select a place to return to the map.' : locationMode === 'route' ? 'Choose stops. Move along the road at 45 mph.' : 'Choose a phone and a point on the map.';
+  $('#panel-subtitle').textContent = showingSaved ? 'Select a place to return to the map.' : locationMode === 'route' ? `Choose stops. Move along the road at ${routeSpeedValue()} mph.` : 'Choose a phone and a point on the map.';
 }
 
 function handoffPhone() {
@@ -613,10 +678,65 @@ $('#add-route-stop').onclick = () => {
 };
 $('#clear-route').onclick = () => { routeStops = []; routePlan = null; drawRoute(); renderRoute(); paintIcons(); };
 $('#plan-route').onclick = async () => {
-  const planned = await runOperation(() => api.planRoute(routeStops));
+  const planned = await runOperation(() => api.planRoute({ waypoints: routeStops, ...routeOptions() }));
   if (planned) { routePlan = planned; drawRoute(); fitRoute(); renderRoute(); paintIcons(); }
 };
-$('#route-play').onclick = () => runOperation(() => state.route?.status === 'running' ? api.pauseRoute() : state.route?.status === 'paused' ? api.resumeRoute() : api.startRoute({ deviceId: selectedDeviceId, routeId: routePlan?.id }));
+$('#route-play').onclick = () => runOperation(() => state.route?.status === 'running' ? api.pauseRoute() : state.route?.status === 'paused' ? api.resumeRoute() : api.startRoute({ deviceId: selectedDeviceId, routeId: routePlan?.id, ...routeOptions() }));
+document.querySelectorAll('[data-route-mode]').forEach(button => { button.onclick = () => {
+  routeMode = button.dataset.routeMode;
+  if (!speedEdited) $('#route-speed').value = ROUTE_MODE_INFO[routeMode].defaultSpeed;
+  renderRoute(); paintIcons();
+}; });
+$('#route-speed').addEventListener('input', () => { speedEdited = true; renderRoute(); paintIcons(); });
+$('#route-save').onclick = () => {
+  const stops = routeStops.length >= 2 ? routeStops : routePlan?.waypoints;
+  $('#route-name').value = stops?.length >= 2 ? `${stops[0].label} → ${stops.at(-1).label}` : 'My route';
+  $('#route-save-summary').textContent = routePlan ? `${(routePlan.distanceMeters / 1609.344).toFixed(2)} miles · ${ROUTE_MODE_INFO[routeMode].label} · ${routeSpeedValue()} mph${routePlan.imported ? ' · Imported track' : ''}` : `${ROUTE_MODE_INFO[routeMode].label} · ${routeSpeedValue()} mph`;
+  $('#route-save-dialog').showModal();
+};
+$('#route-save-form').onsubmit = async (event) => {
+  event.preventDefault();
+  const name = $('#route-name').value.trim();
+  if (!name) return;
+  const payload = { name, ...routeOptions() };
+  if (routePlan?.imported) { payload.coordinates = routePlan.coordinates; payload.waypoints = routePlan.waypoints; }
+  else payload.waypoints = routeStops.length >= 2 ? routeStops : routePlan?.waypoints;
+  if (!payload.waypoints?.length && !payload.coordinates) return;
+  const result = await runOperation(() => api.saveRoute(payload), 'Route saved.');
+  if (result) $('#route-save-dialog').close();
+};
+$('#route-return').onclick = async () => {
+  if (routePlan?.imported) {
+    const planned = await runOperation(() => api.importRoute({ coordinates: [...routePlan.coordinates].reverse(), label: routePlan.waypoints?.[0]?.label || 'Return', ...routeOptions() }));
+    if (planned) { routePlan = planned; routeStops = planned.waypoints.map(stop => ({ ...stop })); syncRouteControls(planned); drawRoute(); fitRoute(); renderRoute(); paintIcons(); notify('Return route planned. Press Start route when ready.'); }
+    return;
+  }
+  if (routeStops.length < 2) return;
+  routeStops = [...routeStops].reverse();
+  routePlan = null; drawRoute(); renderRoute(); paintIcons();
+  const planned = await runOperation(() => api.planRoute({ waypoints: routeStops, ...routeOptions() }));
+  if (planned) { routePlan = planned; drawRoute(); fitRoute(); renderRoute(); paintIcons(); notify('Return route planned. Press Start route when ready.'); }
+};
+$('#route-export').onclick = () => {
+  if (!routePlan) return;
+  const name = `${routePlan.waypoints?.[0]?.label || 'Start'} to ${routePlan.waypoints?.at(-1)?.label || 'End'}`;
+  const blob = new Blob([buildGpx({ name, coordinates: routePlan.coordinates, waypoints: routePlan.waypoints || [] })], { type: 'application/gpx+xml' });
+  const link = document.createElement('a');
+  link.href = URL.createObjectURL(blob);
+  link.download = 'roam-route.gpx';
+  link.click();
+  setTimeout(() => URL.revokeObjectURL(link.href), 5000);
+};
+$('#route-import').onclick = () => $('#route-import-file').click();
+$('#route-import-file').addEventListener('change', async (event) => {
+  const file = event.target.files?.[0];
+  event.target.value = '';
+  if (!file) return;
+  const coordinates = parseGpx(await file.text());
+  if (coordinates.length < 2) { notify('That GPX file has no usable track points.', true); return; }
+  const planned = await runOperation(() => api.importRoute({ coordinates, label: file.name.replace(/\.gpx$/i, ''), ...routeOptions() }));
+  if (planned) { routePlan = planned; routeStops = planned.waypoints.map(stop => ({ ...stop })); locationMode = 'route'; drawRoute(); fitRoute(); renderRoute(); paintIcons(); notify('Track imported. Press Start route when ready.'); }
+});
 $('#restore-button').onclick = () => runOperation(() => api.stopLocation(), 'Restore command accepted. Phone apps may need a moment to refresh.', 'restore');
 $('#toast-close').onclick = () => { $('#toast').hidden = true; clearTimeout(toastTimer); };
 $('#install-runtime').onclick = () => runOperation(() => api.installRuntime(), 'Device tools checked.');
@@ -705,6 +825,6 @@ api.getState().then(async next => {
   acceptState(next);
   if (api.getRoute) {
     const planned = await api.getRoute();
-    if (planned) { routePlan = planned; routeStops = planned.waypoints; drawRoute(); renderRoute(); paintIcons(); }
+    if (planned) { routePlan = planned; routeStops = planned.waypoints; syncRouteControls(planned); drawRoute(); renderRoute(); paintIcons(); }
   }
 }).catch((error) => notify(`Roam could not initialize: ${error.message}`, true));

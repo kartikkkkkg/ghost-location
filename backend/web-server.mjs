@@ -41,6 +41,7 @@ function publicState(snapshot) {
     session: snapshot.session,
     route: snapshot.route,
     savedPlaces: snapshot.savedPlaces || [],
+    savedRoutes: (snapshot.savedRoutes || []).map(route => ({ id: route.id, name: route.name, mode: route.mode, speedMph: route.speedMph, stopCount: route.waypoints?.length || 0, imported: Boolean(route.coordinates) })),
     recentPlaces: snapshot.recentPlaces || [],
     busy: Boolean(snapshot.busy),
     warning: snapshot.warning || null,
@@ -217,7 +218,10 @@ export class WebControlServer {
         sendJson(response, 200, publicState(await this.controller.stopLocation()));
       } else if (request.method === 'POST' && route === '/api/route/plan') {
         const body = await readJson(request);
-        sendJson(response, 200, { route: await this.controller.planRoute(body.waypoints) });
+        sendJson(response, 200, { route: await this.controller.planRoute({ waypoints: body.waypoints, mode: body.mode, speedMph: body.speedMph, pacing: body.pacing, loop: body.loop }) });
+      } else if (request.method === 'POST' && route === '/api/route/saved') {
+        const body = await readJson(request);
+        sendJson(response, 200, publicState(await this.controller.startSavedRoute(body.id, body.deviceId)));
       } else if (request.method === 'POST' && route === '/api/route/start') {
         const body = await readJson(request);
         sendJson(response, 200, publicState(await this.controller.startRoute(body)));
